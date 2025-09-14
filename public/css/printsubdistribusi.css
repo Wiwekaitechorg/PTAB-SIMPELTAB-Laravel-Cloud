@@ -1,0 +1,42 @@
+
+    @page { 
+        size: A4 ;
+        size:landscape;
+    }
+  
+    h1 {
+        font-weight: bold;
+        font-size: 20pt;
+   
+    }
+    h3 {
+        width: 400px;
+    }
+  
+    table {
+        border-collapse: collapse;
+        width: 100%;
+    }
+    .text-center {
+        text-align: center;
+    }
+    th{
+        padding: 8px 8px;
+        border-right:1.5px solid #000000 ;
+        border-left:1.5px solid #000000 ;
+        border-top:1px solid #000000;
+        border-bottom:1px solid #000000;
+        text-align: center;
+    }
+    td{
+        padding: 3px 3px 8px 8px;
+        border-right:1.5px solid #000000 ;
+        border-left:1.5px solid #000000 ;
+        border-top:1px solid #000000;
+        border-bottom:1px solid #000000;
+   }
+   @media print {
+    * {
+      -webkit-print-color-adjust: exact; 
+      }
+    }
