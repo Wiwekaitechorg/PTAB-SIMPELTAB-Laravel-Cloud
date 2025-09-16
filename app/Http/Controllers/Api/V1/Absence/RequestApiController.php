@@ -1044,9 +1044,12 @@ class RequestApiController extends Controller
             if ($request->file('imageP')) {
                 $image = $request->file('imageP');
                 $resourceImage = $image;
-                $nameImage = 'imageP' . date('Y-m-d h:i:s') . '.' . $image->extension();
+                $nameImage = 'imageP_' . now()->format('Ymd_His') . '.' . $image->extension();
                 $file_extImage = $image->extension();
-                $folder_upload = 'images/RequestFile';
+                $folder_upload = public_path('images/RequestFile'); // absolute path under public
+                if (!file_exists($folder_upload)) {
+                    mkdir($folder_upload, 0777, true);
+                }
                 $resourceImage->move($folder_upload, $nameImage);
 
                 // dd($request->file('old_image')->move($folder_upload, $img_name));

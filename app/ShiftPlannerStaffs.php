@@ -1,5 +1,4 @@
 <?php
-
 namespace App;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -18,6 +17,18 @@ class ShiftPlannerStaffs extends Model
         'created_at',
         'updated_at',
     ];
+
+    public function scopeTodayForStaff($query, $staffId)
+    {
+        return $query->where('shift_planner_staffs.staff_id', $staffId)
+            ->whereDate('shift_planner_staffs.start', now());
+    }
+
+    public function scopeWithoutAbsenceLog($query)
+    {
+        return $query->leftJoin('absence_logs', 'shift_planner_staffs.id', '=', 'absence_logs.shift_planner_id')
+            ->whereNull('absence_logs.id');
+    }
 
     public function absenceLogs()
     {

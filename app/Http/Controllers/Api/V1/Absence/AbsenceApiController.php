@@ -25,89 +25,31 @@ use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Image;
+use App\Services\AbsenceService;
 
 class AbsenceApiController extends Controller
 {
 
-    // public function index2(Request $request)
-    // {
-    //     // untuk menampung data menu
-    //     $reguler = "";
-    //     $holiday = "";
-    //     $break = "";
-    //     $duty = "";
-    //     $finish = "";
-    //     $excuse_id = "";
-    //     $absenceOut = [];
+    protected $absenceService;
 
-    //     $excuse = [];
-    //     $visit = [];
-    //     $duty = [];
-    //     $extra = [];
+    public function __construct(AbsenceService $absenceService)
+    {
+        $this->absenceService = $absenceService;
+    }
 
-    //     // mematikan menu
-    //     $menuReguler = "OFF";
-    //     $menuHoliday = "OFF";
-    //     $menuBreak = "OFF";
-    //     $menuExcuse = "OFF";
-    //     $menuVisit = "OFF";
-    //     $menuDuty = "OFF";
-    //     $menuFinish = "OFF";
-    //     $menuExtra = "OFF";
-    //     $menuLeave = "OFF";
-    //     $menuWaiting = "OFF";
-    //     $menuPermission = "OFF";
-    //     $geofence_off = "OFF";
+    public function index(Request $request)
+    {
+        $data = $this->absenceMenuService->getMenuData($request->staff_id);
 
-    //     // get ID
-    //     $excuseC = [];
-    //     $visitC = [];
-    //     $extraC = [];
-
-    //     $absence_excuse = [];
-
-    //     $staff = Staff::where('staff_id', $request->staff_id)->first();
-
-    //     // cek shift atau reguler
-    //     if ($staff->work_type_id === 1) {
-    //         // cek jika ada pengajuan
-
-    //         $absence_request = AbsenceRequest::where('start', '<=', date('Y-m-d H:i:s'))
-    //             ->where('end', '>=', date('Y-m-d H:i:s'))
-    //             ->where('status', 'approve')
-    //             ->where('staff_id', $staff->id)
-    //             ->get();
-
-    //         foreach ($absence_request as $data) {
-    //             if ($absence_request->category == 'excuse') {
-    //             } else if ($absence_request->category == 'visit') {
-    //             } else if ($absence_request->category == 'extra') {
-    //             } else if ($absence_request->category == 'permission') {
-    //                 return response()->json([
-    //                     $status => "permission"
-    //                 ]);
-    //             } else if ($absence_request->category == 'leave') {
-    //                 return response()->json([
-    //                     $status => "leave"
-    //                 ]);
-    //             } else if ($absence_request->category == 'duty') {
-    //                 return response()->json([
-    //                     $status => "duty"
-    //                 ]);
-    //             } else if ($absence_request->category == 'geolocation_off') {
-    //             } else if ($absence_request->category == 'forget') {
-    //             } else if ($absence_request->category == 'location') {
-    //             } else if ($absence_request->category == 'AdditionalTime') {
-    //             } else if ($absence_request->category == 'dispense') {
-    //             }
-    //         }
-
-    //         $absence = Absence::where('staff_id', $staff->id)->first();
-    //         if ($absence) {
-    //             // $absence->
-    //         }
-    //     }
-    // }
+        // return as JSON or pass to view
+        return response()->json([
+            'message' => 'Success',
+            'menu' => $data['menu'],
+            'location' => $data['location'],
+            'problem' => $data['problem'],
+            'date' => now(),
+        ]);
+    }
 
     public function user($id)
     {
@@ -1983,7 +1925,7 @@ class AbsenceApiController extends Controller
         return response()->json($data);
     }
 
-    public function index(Request $request)
+    public function index_OLD(Request $request)
     {
         // untuk menampung data menu
         $reguler    = "";

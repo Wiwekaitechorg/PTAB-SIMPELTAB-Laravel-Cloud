@@ -17,4 +17,11 @@ class WorkUnit extends Model
         'lng',
         'radius',
     ];
+
+    public function scopeWithStaffAndType($query, $staffId)
+    {
+        return $query->join('staffs', 'staffs.work_unit_id', '=', 'work_units.id')
+            ->join('work_types', 'staffs.work_type_id', '=', 'work_types.id')
+            ->where('staffs.id', $staffId);
+    }
 }
