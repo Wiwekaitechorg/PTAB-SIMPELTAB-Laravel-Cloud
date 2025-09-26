@@ -15,14 +15,4 @@ class StaffSpecial extends Model
         'gps',
         'expired_date'
     ];
-
-    public function scopeValid($query)
-    {
-        return $query->whereDate('expired_date', '>=', date('Y-m-d'));
-    }
-
-    public function scopeByStaff($query, $staffId)
-    {
-        return $query->where('staff_id', $staffId);
-    }
 }

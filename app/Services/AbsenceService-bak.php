@@ -30,18 +30,18 @@ class AbsenceMenuService
         $extra  = [];
 
         // mematikan menu
-        $menuReguler        = "OFF";
-        $menuHoliday        = "OFF";
-        $menuBreak          = "OFF";
-        $menuExcuse         = "OFF";
-        $menuVisit          = "OFF";
-        $menuDuty           = "OFF";
-        $menuFinish         = "OFF";
-        $menuExtra          = "OFF";
-        $menuLeave          = "OFF";
-        $menuWaiting        = "OFF";
-        $menuPermission     = "OFF";
-        $geofence_off       = "OFF";
+        $menuReguler    = "OFF";
+        $menuHoliday    = "OFF";
+        $menuBreak      = "OFF";
+        $menuExcuse     = "OFF";
+        $menuVisit      = "OFF";
+        $menuDuty       = "OFF";
+        $menuFinish     = "OFF";
+        $menuExtra      = "OFF";
+        $menuLeave      = "OFF";
+        $menuWaiting    = "OFF";
+        $menuPermission = "OFF";
+        $geofence_off   = "OFF";
         $geofence_off_break = "OFF";
 
         // get ID
@@ -720,12 +720,12 @@ class AbsenceMenuService
                     ->where('absence_categories.type', '=', 'break')
                     ->where('absence_logs.status', '=', '1')
                     ->orderBy('absence_logs.id', 'ASC')
-                    ->first();
+                    ->first();                
                 if ($break) {
                     $menuBreak = "ON";
                     //if any dinas dalam active
-                    if ($menuVisit != 'OFF') {
-                        $geofence_off_break = "ON";
+                    if($menuVisit !='OFF'){
+                    $geofence_off_break = "ON";
                     }
                 }
                 // return response()->json([
@@ -1070,7 +1070,7 @@ class AbsenceMenuService
                                     'menuExcuse'     => $menuExcuse,
                                     'menuDuty'       => $menuDuty,
                                     'menuFinish'     => $menuFinish,
-                                    'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                    'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                 ],
                                 'break'       => $break,
                                 'date'        => $coordinat->type,
@@ -1147,7 +1147,7 @@ class AbsenceMenuService
                                         'menuExtra'      => $menuExtra,
                                         'menuDuty'       => $menuDuty,
                                         'menuFinish'     => $menuFinish,
-                                        'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                        'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                     ],
                                     'extraC'        => $extraC,
                                     'extra'         => $extra,
@@ -1177,7 +1177,7 @@ class AbsenceMenuService
                                         'menuHoliday'    => $menuHoliday,
                                         'menuDuty'       => $menuDuty,
                                         'menuFinish'     => $menuFinish,
-                                        'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                        'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                         'menuWaiting'    => $menuWaiting,
 
                                     ],
@@ -1213,7 +1213,7 @@ class AbsenceMenuService
                                     'menuVisit'      => $menuVisit,
                                     'menuDuty'       => $menuDuty,
                                     'menuFinish'     => $menuFinish,
-                                    'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                    'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                 ],
                             ]);
                         }
@@ -1237,7 +1237,7 @@ class AbsenceMenuService
                                 'menuExcuse'     => $menuExcuse,
                                 'menuDuty'       => $menuDuty,
                                 'menuFinish'     => $menuFinish,
-                                'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                             ],
                             'date'    => date('Y-m-d h:i:s'),
                         ]);
@@ -1399,7 +1399,7 @@ class AbsenceMenuService
                                                 'menuExcuse'     => $menuExcuse,
                                                 'menuDuty'       => $menuDuty,
                                                 'menuFinish'     => $menuFinish,
-                                                'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                                'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                             ],
                                             'break'       => $break,
                                             'date'        => $coordinat->type,
@@ -1480,7 +1480,7 @@ class AbsenceMenuService
                                             'menuExtra'      => $menuExtra,
                                             'menuDuty'       => $menuDuty,
                                             'menuFinish'     => $menuFinish,
-                                            'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                            'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                         ],
                                         'extraC'        => $extraC,
                                         'extra'         => $extra,
@@ -1509,7 +1509,7 @@ class AbsenceMenuService
                                             'menuHoliday'    => $menuHoliday,
                                             'menuDuty'       => $menuDuty,
                                             'menuFinish'     => $menuFinish,
-                                            'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                            'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                             'menuWaiting'    => $menuWaiting,
                                         ],
                                         'waitingMessage' => "Absen Sudah Selesai",
@@ -1544,7 +1544,7 @@ class AbsenceMenuService
                                         'menuVisit'      => $menuVisit,
                                         'menuDuty'       => $menuDuty,
                                         'menuFinish'     => $menuFinish,
-                                        'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                                        'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                                     ],
                                 ]);
                             }
@@ -1587,7 +1587,7 @@ class AbsenceMenuService
                     'menuVisit'      => $menuVisit,
                     'menuDuty'       => $menuDuty,
                     'menuFinish'     => $menuFinish,
-                    'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
+                    'geolocationOff' => $geofence_off_break =='ON' ?$geofence_off_break:$geofence_off,
                 ],
             ]);
         }

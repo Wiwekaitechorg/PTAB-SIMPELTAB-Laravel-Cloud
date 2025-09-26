@@ -19,16 +19,8 @@ class WorkTypeDays extends Model
         'work_type_id',
     ];
 
-    public function scopePresenceFor($query, $workTypeId, $day)
+    public function workType()
     {
-        return $query->selectRaw(
-                'duration,duration_exp,queue,type,time,start,
-                 absence_category_id,work_type_days.id as work_type_day_id'
-            )
-            ->join('absence_categories', 'work_type_days.absence_category_id', '=', 'absence_categories.id')
-            ->where('work_type_id', $workTypeId)
-            ->where('day_id', $day)
-            ->where('absence_categories.type', 'presence')
-            ->orderBy('queue','ASC');
+        return $this->belongsTo(WorkTypes::class, 'work_type_id');
     }
 }

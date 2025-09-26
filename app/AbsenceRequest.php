@@ -1,12 +1,15 @@
 <?php
 namespace App;
 
+use App\Traits\AbsenceRequestFilter;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class AbsenceRequest extends Model
 {
     use HasFactory;
+    use AbsenceRequestFilter;
+
     protected $fillable = [
         'staff_id',
         'title',
@@ -24,39 +27,22 @@ class AbsenceRequest extends Model
 
     ];
 
-    public function scopeCurrentExtraNight($query, $staffId)
-    {
-        // no pending status at night
-        return $query->where('start', '<=', now())
-            ->where('end', '>=', now())
-            ->where('category', 'extra')
-            ->where('staff_id', $staffId)
-            ->where(function ($q) {
-                $q->where('status', 'approve')
-                  ->orWhere('status', 'active');
-            })
-            ->orderByRaw("FIELD(status,'active','approve')");
-    }
+    public static array $baseFilter = [
+        'current'      => true,
+        'start_col'    => 'start',
+        'end_col'      => 'end',
+        'status'       => ['approve', 'active'],
+        'order_by_raw' => [
+            'FIELD(status,"active","approve")',
+        ],
+        'order_by'     => 'id',
+        'order_dir'    => 'DESC',
+        'with'         => ['workUnit'],
+    ];
 
-    public function scopeActiveNow($q)
+    public function workUnit()
     {
-        return $q->where('start', '<=', now())
-                 ->where('end', '>=', now())
-                 ->where(function ($query) {
-                     $query->where('status', 'approve')
-                           ->orWhere('status', 'active');
-                 })
-                 ->orderBy(DB::raw('FIELD(status,"active","approve")'));
-    }
-
-    public function scopeForStaff($q, $staffId)
-    {
-        return $q->where('staff_id', $staffId);
-    }
-
-    public function scopeByType(Builder $query, string $type)
-    {
-        return $query->where('type', $type);
+        return $this->belongsTo(WorkUnit::class, 'work_unit_id');
     }
 
     public function getCreatedAtAttribute()
@@ -133,37 +119,5 @@ class AbsenceRequest extends Model
             $query->where('staffs.dapertement_id', $dapertement);
         }
         return $query;
-    }
-
-    public function scopeActiveInPeriod($query, $now)
-    {
-        return $query->where('start', '<=', $now)
-            ->where('end', '>=', $now);
-    }
-
-    public function scopeByCategory($query, $category)
-    {
-        return $query->where('category', $category);
-    }
-
-    public function scopeByStaff($query, $staffId)
-    {
-        return $query->where('staff_id', $staffId);
-    }
-
-    public function scopeApprovedOrActive($query)
-    {
-        return $query->whereIn('status', ['approve', 'active']);
-    }
-
-    public function scopeGeofenceOff($query)
-    {
-        return $query->whereIn('category', ['geolocation_off', 'forget', 'AdditionalTime'])
-            ->where('status', 'approve');
-    }
-
-    public function scopeOrderActiveApproveFirst($query)
-    {
-        return $query->orderByRaw("FIELD(status, 'active', 'approve')");
     }
 }

@@ -16,10 +16,4 @@ class Holiday extends Model
         'start',
         'end',
     ];
-
-    public function scopeToday($query)
-    {
-        return $query->whereDate('start', '<=', today())
-                     ->whereDate('end', '>=', today());
-    }
 }

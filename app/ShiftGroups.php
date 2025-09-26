@@ -24,28 +24,6 @@ class ShiftGroups extends Model
         'type_s'
     ];
 
-    /**
-     * Scope: all absence time slots for a given shift group (non-break).
-     */
-    public function scopeAbsenceTimeSlots(Builder $query, int $shiftGroupId): Builder
-    {
-        return $query->select(
-                'duration',
-                'duration_exp',
-                'absence_categories.queue',
-                'type',
-                'time',
-                'start',
-                'absence_category_id',
-                'shift_group_timesheets.id as shift_group_timesheet_id'
-            )
-            ->join('shift_group_timesheets', 'shift_group_timesheets.shift_group_id', '=', 'shift_groups.id')
-            ->join('absence_categories', 'shift_group_timesheets.absence_category_id', '=', 'absence_categories.id')
-            ->where('shift_groups.id', $shiftGroupId)
-            ->where('absence_categories.type', '!=', 'break')
-            ->orderBy('absence_categories.queue', 'ASC');
-    }
-
 
     public function scopeFilterSubDapertement($query, $ststussm)
     {

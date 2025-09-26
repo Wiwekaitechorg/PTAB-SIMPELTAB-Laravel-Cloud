@@ -1,12 +1,15 @@
 <?php
+
 namespace App;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\ShiftPlannerStaffsFilter;
 
 class ShiftPlannerStaffs extends Model
 {
     use HasFactory;
+    use ShiftPlannerStaffsFilter;
     protected $fillable = [
         'id',
         'shift_group_id',
@@ -18,16 +21,22 @@ class ShiftPlannerStaffs extends Model
         'updated_at',
     ];
 
-    public function scopeTodayForStaff($query, $staffId)
-    {
-        return $query->where('shift_planner_staffs.staff_id', $staffId)
-            ->whereDate('shift_planner_staffs.start', now());
-    }
+    public static array $baseFilter = [
+        // 'current'   => true,
+        // 'start_col' => 'date',
+        // 'end_col'   => 'date',
+        // 'status'       => ['1', '0'],
+        // 'order_by_raw' => [
+        //     'FIELD(status,"active","approve")',
+        // ],
+        'order_by'     => 'id',
+        'order_dir'    => 'DESC',
+        'with'         => ['shiftGroup'],
+    ];
 
-    public function scopeWithoutAbsenceLog($query)
+    public function shiftGroup()
     {
-        return $query->leftJoin('absence_logs', 'shift_planner_staffs.id', '=', 'absence_logs.shift_planner_id')
-            ->whereNull('absence_logs.id');
+        return $this->belongsTo(ShiftGroup::class, 'shift_group_id');
     }
 
     public function absenceLogs()

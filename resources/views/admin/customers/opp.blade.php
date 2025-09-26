@@ -94,6 +94,9 @@
                             No. NIK/KTP
                         </th>
                         <th>
+                            Nama Sesuai KTP
+                        </th>
+                        <th>
                             Status
                         </th>
                         <th>
@@ -202,6 +205,7 @@
         { data: 'lat', name: 'lat', searchable: false },
         { data: 'lng', name: 'lng', searchable: false },
         { data: 'noktp', name: 'noktp', searchable: false },
+        { data: '_namaktp', name: '_namaktp', searchable: false },
         { data: 'status', name: 'status', searchable: false },
         { data: 'actions', name: '{{ trans('global.actions') }}' }
     ],

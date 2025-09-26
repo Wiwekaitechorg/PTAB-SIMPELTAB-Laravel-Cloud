@@ -37,18 +37,19 @@ class AbsenceApiController extends Controller
         $this->absenceService = $absenceService;
     }
 
-    public function index(Request $request)
+    public function index_service(Request $request)
     {
-        $data = $this->absenceMenuService->getMenuData($request->staff_id);
+        $data = $this->absenceService->getMenuData($request->staff_id, $request->shift_group_id);
+        return response()->json($data);
 
-        // return as JSON or pass to view
-        return response()->json([
-            'message' => 'Success',
-            'menu' => $data['menu'],
-            'location' => $data['location'],
-            'problem' => $data['problem'],
-            'date' => now(),
-        ]);
+        // // return as JSON or pass to view
+        // return response()->json([
+        //     'message' => 'Success',
+        //     'menu' => $data['menu'],
+        //     'location' => $data['location'],
+        //     'problem' => $data['problem'],
+        //     'date' => now(),
+        // ]);
     }
 
     public function user($id)
@@ -1781,8 +1782,8 @@ class AbsenceApiController extends Controller
 
         $report = Absence::join('absence_logs', 'absences.id', '=', 'absence_logs.absence_id')
             ->selectRaw('count(IF(absence_category_id = 1 AND status = 0 ,1,NULL)) jumlah_masuk')
-            ->selectRaw('count(IF(absence_category_id = 3 AND status = 0 ,1,NULL)) jumlah_k1')
-            ->selectRaw('count(IF(absence_category_id = 4 AND status = 0 ,1,NULL)) jumlah_k2')
+            ->selectRaw('count(IF(absence_category_id = 3 AND image !="" AND status = 0 ,1,NULL)) jumlah_k1')
+            ->selectRaw('count(IF(absence_category_id = 4 AND image !="" AND status = 0 ,1,NULL)) jumlah_k2')
             ->selectRaw('count(IF(absence_category_id = 5 AND status = 0 ,1,NULL)) jumlah_dinasDalam')
             ->selectRaw('count(IF(absence_category_id = 7 AND status = 0 ,1,NULL)) jumlah_dinasLuar')
             ->selectRaw('count(IF(absence_category_id = 8 AND status = 0 ,1,NULL)) jumlah_cuti')
@@ -1925,7 +1926,7 @@ class AbsenceApiController extends Controller
         return response()->json($data);
     }
 
-    public function index_OLD(Request $request)
+    public function index(Request $request)
     {
         // untuk menampung data menu
         $reguler    = "";
@@ -7514,8 +7515,8 @@ class AbsenceApiController extends Controller
                         $get_dispen     = $absence ? $absence->absence_logs->where('absence_category_id', 14)->first() : null;
                         $get_datang     = $absence ? $absence->absence_logs->where('absence_category_id', 1)->where('status', 0)->first() : null;
                         $get_pulang     = $absence ? $absence->absence_logs->where('absence_category_id', 2)->where('status', 0)->first() : null;
-                        $get_kegiatan1  = $absence ? $absence->absence_logs->where('absence_category_id', 3)->where('status', 0)->first() : null;
-                        $get_kegiatan2  = $absence ? $absence->absence_logs->where('absence_category_id', 4)->where('status', 0)->first() : null;
+                        $get_kegiatan1  = $absence ? $absence->absence_logs->where('absence_category_id', 3)->where('status', 0)->where('image', '!=', '')->first() : null;
+                        $get_kegiatan2  = $absence ? $absence->absence_logs->where('absence_category_id', 4)->where('status', 0)->where('image', '!=', '')->first() : null;
                         //additional
 
                         //get req izin
@@ -9648,8 +9649,8 @@ class AbsenceApiController extends Controller
             $report = Absence::join('absence_logs', 'absences.id', '=', 'absence_logs.absence_id')
                 ->selectRaw('count(IF(absence_category_id = 1 AND status = 0 ,1,NULL)) jumlah_masuk')
                 ->selectRaw('count(IF(absence_category_id = 2 AND status = 0 ,1,NULL)) jumlah_pulang')
-                ->selectRaw('count(IF(absence_category_id = 3 AND status = 0 ,1,NULL)) jumlah_k1')
-                ->selectRaw('count(IF(absence_category_id = 4 AND status = 0 ,1,NULL)) jumlah_k2')
+                ->selectRaw('count(IF(absence_category_id = 3 AND image !="" AND status = 0 ,1,NULL)) jumlah_k1')
+                ->selectRaw('count(IF(absence_category_id = 4 AND image !="" AND status = 0 ,1,NULL)) jumlah_k2')
                 ->selectRaw('count(IF(absence_category_id = 5 AND status = 0 ,1,NULL)) jumlah_dinasDalam')
                 ->selectRaw('count(IF(absence_category_id = 7 AND status = 0 ,1,NULL)) jumlah_dinasLuar')
                 ->selectRaw('count(IF(absence_category_id = 8 AND status = 0 ,1,NULL)) jumlah_cuti')

@@ -103,6 +103,7 @@ class CustomersController extends Controller
                 "lat"           => $d->lat,
                 "lng"           => $d->lng,
                 "noktp"         => $d->noktp,
+                "nama_sesuai_ktp"         => $d->_namaktp,
                 "telp"         => $phone_number,
                 "status"        => $d->status,
                 "foto_rumah"    => "https://ptab-vps-storage.com/pdam" . $d->_filegambar,
@@ -143,7 +144,7 @@ class CustomersController extends Controller
     {
         ini_set("memory_limit", -1);
         set_time_limit(0);
-        abort_unless(\Gate::allows('customer_opp_access'), 403);
+        abort_unless(\Gate::allows('customer_opp_access'), 403);  
 
         if ($request->ajax()) {
             //set query
@@ -154,7 +155,7 @@ class CustomersController extends Controller
                 ->FilterStaff($request->staff)
                 ->orderBy('tblpelanggan.nomorrekening', 'ASC')->get();
 
-            //*
+            //*->offset(0)->limit(10)
             $qry_arr = [];
             foreach ($qry as $qry_ext) {
                 //init status
@@ -184,9 +185,11 @@ class CustomersController extends Controller
                 }
             }
             //$qry = json_encode($qry_arr);
+            //return $qry_arr;
             //*/
 
             $table = Datatables::of($qry_arr);
+            //$table = Datatables::of($qry);
 
             $table->addColumn('placeholder', '');
             $table->addColumn('actions', '&nbsp;');
@@ -270,6 +273,10 @@ class CustomersController extends Controller
                 //return $row->noktp ? $row->noktp : "";
                 return $row->noktp ? "'" . $row->noktp : "";
             });
+            
+            $table->editColumn('_namaktp', function ($row) {
+                return $row->_namaktp ? $row->_namaktp : "";
+            });
 
             $table->editColumn('status', function ($row) {
                 //$basepath = str_replace("laravel-simpletab", "public_html/pdam/", \base_path());
@@ -281,10 +288,13 @@ class CustomersController extends Controller
 
             $table->addIndexColumn();
             return $table->make(true);
+            //*/
         }
         $staff = CtmPbk::all();
+        //return $staff;
         //default view
         return view('admin.customers.opp', compact('staff'));
+        
     }
 
     public function index(Request $request)

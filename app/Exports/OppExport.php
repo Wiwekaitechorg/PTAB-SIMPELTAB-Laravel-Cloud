@@ -59,20 +59,21 @@ class OppExport extends DefaultValueBinder implements
             "lat",           // I
             "lng",           // J
             "noktp",         // K
-            "telp",          // L
-            "status",        // M
-            "foto_rumah",    // N
-            "foto_ktp",      // O
-            "foto_wm",       // P
+            "nama_sesuai_ktp", // L
+            "telp",          // M
+            "status",        // N
+            "foto_rumah",    // O
+            "foto_ktp",      // P
+            "foto_wm",       // Q
         ];
     }
 
-    // 🔒 Force columns A, K, L to be written as TEXT at the cell level
+    // 🔒 Force columns A, K, M to be written as TEXT at the cell level
     public function bindValue(Cell $cell, $value): bool
     {
         $col = $cell->getColumn();
 
-        if (in_array($col, ['A', 'K', 'L'], true)) {
+        if (in_array($col, ['A', 'K', 'M'], true)) {
             // Ensure we pass a scalar string; null becomes empty string
             $stringValue = is_null($value) ? '' : (string) $value;
 
@@ -107,7 +108,7 @@ class OppExport extends DefaultValueBinder implements
         return [
             'A' => NumberFormat::FORMAT_TEXT,
             'K' => NumberFormat::FORMAT_TEXT,
-            'L' => NumberFormat::FORMAT_TEXT,
+            'M' => NumberFormat::FORMAT_TEXT,
         ];
     }
 }
