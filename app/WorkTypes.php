@@ -17,4 +17,9 @@ class WorkTypes extends Model
         'job_id',
         'subdapertement_id'
     ];
+
+    public function workTypeDays()
+    {
+        return $this->hasMany(WorkTypeDays::class, 'work_type_id');
+    }
 }

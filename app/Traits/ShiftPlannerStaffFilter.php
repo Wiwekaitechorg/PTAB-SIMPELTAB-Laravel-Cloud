@@ -3,7 +3,7 @@ namespace App\Traits;
 
 use Illuminate\Database\Eloquent\Builder;
 
-trait AbsenceRequestFilter
+trait ShiftPlannerStaffFilter
 {
     /**
      * Base filters for the model. You can override this in each model if needed.
@@ -19,6 +19,23 @@ trait AbsenceRequestFilter
     {
         $filters = array_merge(static::$baseFilter, $filters);
 
+        // Define which simple fields you want to support
+        $simpleFilters = ['status', 'staff_id'];
+
+        foreach ($simpleFilters as $field) {
+            if (array_key_exists($field, $filters)) {
+                $value = $filters[$field];
+
+                $q->where(function ($query) use ($field, $value) {
+                    if (is_array($value)) {
+                        $query->whereIn($field, $value);
+                    } else {
+                        $query->where($field, $value);
+                    }
+                });
+            }
+        }
+        
         // select
         if (! empty($filters['select'])) {
             if (is_array($filters['select'])) {
@@ -36,11 +53,16 @@ trait AbsenceRequestFilter
                 : [$filters['with']];
 
             $q->with($with);
+        }        
+
+        // no absence logs filter
+        if (!empty($filters['without_absence'])) {
+            $q->whereDoesntHave('absenceLogs');
         }
 
-        // staff_id
-        if (! empty($filters['staff_id'])) {
-            $q->where($this->getTable() . '.staff_id', $filters['staff_id']);
+        // date filter (use 'date' key)
+        if (isset($filters['start_date'])) {
+            $q->whereDate('start', $filters['start_date']);
         }
 
         // current (start/end window)
@@ -62,34 +84,12 @@ trait AbsenceRequestFilter
             });
         }
 
-        // status
-        if (isset($filters['status'])) {
-            $q->where(function ($query) use ($filters) {
-                if (is_array($filters['status'])) {
-                    $query->whereIn('status', $filters['status']);
-                } else {
-                    $query->where('status', $filters['status']);
-                }
-            });
-        }
-
-        // // category / type / extra columns
-        // foreach (['category', 'type', 'absence_category_id', 'absence_id'] as $col) {
-        //     if (isset($filters[$col])) {
-        //         $value = $filters[$col];
-
-        //         // if array → whereIn
-        //         if (is_array($value)) {
-        //             $q->whereIn($this->getTable() . '.' . $col, $value);
-        //         } else {
-        //             $q->where($this->getTable() . '.' . $col, $value);
-        //         }
-        //     }
-        // }
-
-        // absence_request_id
-        if (! empty($filters['absence_request_id'])) {
-            $q->where($this->getTable() . '.absence_request_id', $filters['absence_request_id']);
+        // Example: order by related ShiftGroup.queue
+        if (!empty($filters['order_by_queue'])) {
+            $q->orderBy(
+                ShiftGroup::select('queue')
+                    ->whereColumn('shift_groups.id', 'shift_planner_staffs.shift_group_id')
+            );
         }
 
         // === Ordering ===

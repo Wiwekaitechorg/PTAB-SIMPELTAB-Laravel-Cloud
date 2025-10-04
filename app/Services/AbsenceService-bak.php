@@ -84,15 +84,7 @@ class AbsenceMenuService
             $geofence_off = "ON";
         }
 
-        // return response()->json([
-        //     'message' => 'Success',
-        //     'menu' => [
-        //         'menuReguler' =>  $geofence_off,
-        //     ],
-        //     'waitingMessage' => "Menunggu Persetujuan Cuti",
-        //     'date' => date('Y-m-d h:i:s')
-        // ]);
-        $fingerprint = "ON";
+       $fingerprint = "ON";
         $camera      = "ON";
         $gps         = "ON";
 
@@ -281,24 +273,7 @@ class AbsenceMenuService
             $absence_extra = AbsenceRequest::where('id', $absence_extra_active->absence_request_id)
                 ->first();
 
-            // return response()->json([
-            //     'message' => 'Success',
-            //     'extra' => $extra,
-            //     'absence extra active' =>  $absence_extra_active,
-            //     'absence extra' => $absence_extra
-
-            // ]);
-            // $absence_extra = AbsenceRequest::where('start', '<=', date('Y-m-d H:i:s'))
-            //     ->where('end', '>=', date('Y-m-d H:i:s'))
-            //     ->where('category', 'extra')
-            //     ->where('staff_id', $request->staff_id)
-            //     ->where(function ($query) {
-            //         $query->where('status', 'approve')
-            //             ->orWhere('status', 'active');
-            //     })
-
-            //     ->orderBy(DB::raw("FIELD(status , \"active\", \"approve\" )"))
-            //     ->first();
+           
             if ($extra) {
                 $extra_id = $extra->id;
             } else {
@@ -365,14 +340,6 @@ class AbsenceMenuService
                 ->orderBy(DB::raw("FIELD(status , \"active\", \"approve\" )"))
                 ->first();
         }
-
-        // return response()->json([
-        //     'message' => 'Success',
-        //     'leave' => $absence_extra,
-        //     'permission' => $absenIn,
-        //     'duty' => $showExtra,
-        //     'date' => date('Y-m-d h:i:s')
-        // ]);
 
         // cek hari libur
         if ($leave) {
@@ -728,10 +695,6 @@ class AbsenceMenuService
                     $geofence_off_break = "ON";
                     }
                 }
-                // return response()->json([
-                //     'message' =>  $break,
-                //     // 'sss' => $excuse
-                // ]);
                 // cari absen out expired hari ini untuk mengambil expired date
                 $absenceOut = AbsenceLog::selectRaw('absence_logs.expired_date, absence_logs.start_date,shift_planner_id, queue, status_active, absence_categories.id as absence_category_id, absences.id as absence_id')
                     ->leftJoin('absences', 'absence_logs.absence_id', '=', 'absences.id')
@@ -748,11 +711,6 @@ class AbsenceMenuService
                     ->first();
                 // jika belum ada absen istirahat
             }
-            // cek end
-            // return response()->json([
-            //     'message' =>      $absenceOut,
-            //     // 'sss' => $excuse
-            // ]);
 
             if (date('w') == '0') {
                 $day = '7';
@@ -948,11 +906,6 @@ class AbsenceMenuService
                             }
 
                             // reminder absen bermasalah end
-
-                            // return response()->json([
-                            //     'lat' =>  $list_absence,
-                            //     'c' => $c
-                            // ]);
 
                             // $expired_date = date('Y-m-d H:i:s');
                             try {
@@ -1248,10 +1201,6 @@ class AbsenceMenuService
                             ->where('work_types.id', $coordinat->work_type_id)
                             ->where('day_id', $day)
                             ->first();
-
-                        // return response()->json([
-                        //     'abs' => $absen,
-                        // ]);
 
                         // buat baru start
                         // cek apa sudah ada group absen di tanggal ini

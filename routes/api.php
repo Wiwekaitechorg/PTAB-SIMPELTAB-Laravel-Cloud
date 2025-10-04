@@ -318,6 +318,7 @@ Route::group(['prefix' => 'open/absence', 'namespace' => 'Api\V1\Absence'], func
     Route::get('reportAbsenceExcelTest', 'AbsenceApiController@reportAbsenceExcelTest');
     Route::get('reportAllExcelTest', 'AbsenceApiController@reportAllExcelTest');
     Route::get('test-tmp', 'AbsenceApiController@index_service');
+    Route::get('test-org', 'AbsenceApiController@index');
 });
 
 

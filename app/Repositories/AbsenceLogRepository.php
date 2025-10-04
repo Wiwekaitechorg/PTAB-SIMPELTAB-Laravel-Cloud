@@ -6,333 +6,159 @@ use Illuminate\Support\Collection;
 
 class AbsenceLogRepository
 {
-    protected Collection $collection;
-    protected Collection $collectionAllDate;
-    protected Collection $collectionEndDate;
-    protected Collection $collectionEndDateWithTimesheets;
-    //'with'         => ['absence', 'category', 'category.workTypeDays', 'category.shiftGroupTimesheets'],
+    protected ?int $staffId;
 
     public function __construct(?int $staffId = null)
     {
         if ($staffId !== null) {
-            $this->collection        = AbsenceLog::filter(['where_has' => true, 'staff_id' => $staffId])->get();
-            $this->collectionAllDate = AbsenceLog::filter(['current' => false, 'where_has' => true, 'staff_id' => $staffId])->get();
-            $this->collectionEndDate = AbsenceLog::filter(['current_end' => true, 'where_has' => true, 'staff_id' => $staffId])->get();
-            $this->collectionEndDateWithTimesheets = AbsenceLog::filter(['current_end' => true, 'where_has' => true, 'staff_id' => $staffId, 'with' => ['absence', 'category', 'category.shiftGroupTimesheets']])->get();
-        } else {
-            // no staffId given — empty collection (or all logs if you want)
-            $this->collection                      = collect();
-            $this->collectionAllDate               = collect();
-            $this->collectionEndDate               = collect();
-            $this->collectionEndDateWithTimesheets = collect();
+            $this->staffId = $staffId;
         }
     }
 
-    private function findCollection($logs, array $criteria = [])
+    public function findPresenceShiftGroupPending(int $shift_group_id, ?int $id = null)
     {
-        // first filter by criteria
-        $filtered = $logs->filter(function ($log) use ($criteria) {
-            // type filter (support single or array)
-            if (isset($criteria['type'])) {
-                $types = (array) $criteria['type'];
-                if (isset($criteria['type_not_in']) && $criteria['type_not_in'] === true) {
-                    if (in_array(optional($log->category)->type, $types, true)) {
-                        return false;
-                    }
-                } else {
-                    if (! in_array(optional($log->category)->type, $types, true)) {
-                        return false;
-                    }
-                }
-            }
-
-            // queue filter (support single or array)
-            if (isset($criteria['queue'])) {
-                $queues = (array) $criteria['queue'];
-                if (isset($criteria['queue_not_in']) && $criteria['queue_not_in'] === true) {
-                    if (in_array(optional($log->category)->queue, $queues, true)) {
-                        return false;
-                    }
-                } else {
-                    if (! in_array(optional($log->category)->queue, $queues, true)) {
-                        return false;
-                    }
-                }
-            }
-
-            // status filter
-            if (isset($criteria['status']) && ! in_array($log->status, (array) $criteria['status'], true)) {
-                return false;
-            }
-
-            // absence_request_id filter
-            if (isset($criteria['absence_request_id']) &&
-                $log->absence_request_id !== $criteria['absence_request_id']) {
-                return false;
-            }
-
-            // absence_id filter
-            if (isset($criteria['absence_id']) &&
-                $log->absence_id !== $criteria['absence_id']) {
-                return false;
-            }
-
-            // id filter
-            if (isset($criteria['id']) &&
-                $log->id !== $criteria['id']) {
-                return false;
-            }
-
-            // // ensure BOTH work_type_id AND day_id are provided for the strict match
-            // if (isset($criteria['work_type_id']) && isset($criteria['day_id'])) {
-            //     $workTypeIds = (array) $criteria['work_type_id'];
-            //     $dayIds      = (array) $criteria['day_id'];
-
-            //     // get workTypeDays safely (could be relation or array)
-            //     $workTypeDays = collect(optional($log->category)->workTypeDays ?? $log->category['work_type_days'] ?? []);
-
-            //     // must have at least one row that matches BOTH conditions (AND)
-            //     $hasMatch = $workTypeDays->contains(function ($wtd) use ($workTypeIds, $dayIds) {
-            //         return in_array($wtd->work_type_id, $workTypeIds, true)
-            //         && in_array($wtd->day_id, $dayIds, true);
-            //     });
-
-            //     if (! $hasMatch) {
-            //         return false; // reject this log
-            //     }
-            // }
-
-            return true; // passed all filters
-        });
-
-        // --- Trim nested workTypeDays to only the matching rows if criteria requested ---
-        if (isset($criteria['work_type_id']) && isset($criteria['day_id'])) {
-            $workTypeIds = (array) $criteria['work_type_id'];
-            $dayIds      = (array) $criteria['day_id'];
-
-            $filtered = $filtered->map(function ($log) use ($workTypeIds, $dayIds) {
-                if (! $log->category) {
-                    return $log;
-                }
-
-                // get existing collection/array of workTypeDays
-                $wtds = collect($log->category->workTypeDays ?? $log->category['work_type_days'] ?? []);
-
-                // keep only rows where BOTH work_type_id AND day_id match
-                $matched = $wtds->filter(function ($wtd) use ($workTypeIds, $dayIds) {
-                    return in_array($wtd->work_type_id, $workTypeIds, true)
-                    && in_array($wtd->day_id, $dayIds, true);
-                })->values();
-
-                // attach the filtered list back to the category — support both Eloquent model and array
-                if (is_object($log->category) && method_exists($log->category, 'setRelation')) {
-                    // setRelation accepts a collection of models
-                    $log->category->setRelation('workTypeDays', $matched);
-                } else {
-                    // plain array/stdClass — store as snake-case key too if necessary
-                    $log->category['work_type_days'] = $matched->toArray();
-                    $log->category->work_type_days   = $matched->toArray();
-                }
-
-                return $log;
-            });
-        }
-
-        // --- Trim nested shiftGroupTimesheets to only the matching rows if criteria requested ---
-        if (isset($criteria['shift_group_id'])) {
-            $shiftGroupIds = (array) $criteria['shift_group_id'];
-
-            $filtered = $filtered->map(function ($log) use ($shiftGroupIds) {
-                if (! $log->category) {
-                    return $log;
-                }
-
-                // get existing collection/array of shiftGroupTimesheets
-                $wtds = collect($log->category->shiftGroupTimesheets ?? $log->category['shift_group_timesheets'] ?? []);
-
-                // keep only rows where BOTH shift_group_id AND day_id match
-                $matched = $wtds->filter(function ($wtd) use ($shiftGroupIds) {
-                    return in_array($wtd->shift_group_id, $shiftGroupIds, true);
-                })->values();
-
-                // attach the filtered list back to the category — support both Eloquent model and array
-                if (is_object($log->category) && method_exists($log->category, 'setRelation')) {
-                    // setRelation accepts a collection of models
-                    $log->category->setRelation('shiftGroupTimesheets', $matched);
-                } else {
-                    // plain array/stdClass — store as snake-case key too if necessary
-                    $log->category['shift_group_timesheets'] = $matched->toArray();
-                    $log->category->shift_group_timesheets   = $matched->toArray();
-                }
-
-                return $log;
-            });
-        }
-
-        // default order field and direction
-        $orderBy  = $criteria['order_by'] ?? 'id';
-        $orderDir = $criteria['order_dir'] ?? 'DESC';
-
-        // sort the filtered collection
-        $filtered = $orderDir === 'DESC'
-            ? $filtered->sortByDesc($orderBy)
-            : $filtered->sortBy($orderBy);
-
-        return $filtered->values(); // reset keys
-    }
-
-    public function findLogPresenceShiftGroupPending(int $shift_group_id, ?int $id = null)
-    {
-        // base criteria
-        $criteria = [
-            'type'         => 'presence',
-            'status'       => [1],
+        return AbsenceLog::filter([
+            'staff_id'       => $this->staffId,
+            'current_end'    => true,
+            'where_has'      => true,
+            'with'           => ['absence', 'category', 'category.shiftGroupTimesheets'],            
+            'type'           => 'presence',
+            'status'         => [1],
             'shift_group_id' => $shift_group_id,
-            'order_by'     => 'start_date',
-            'order_dir'    => 'ASC',
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['id'] = $id;
-        }
-        return $this->findCollection($this->collectionEndDateWithTimesheets, $criteria)?->first();
+            'id'             => $id !== null ? $id : null,            
+        ])->first();
     }
 
-    public function findLogPresenceWorkTypePending(int $work_type_id, int $day_id, ?int $id = null)
+    public function findPresenceWorkTypePending(int $work_type_id, int $day_id, ?int $id = null)
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'     => $this->staffId,
+            'current_end'  => true,
+            'where_has'    => true,            
             'type'         => 'presence',
             'status'       => [1],
             'work_type_id' => $work_type_id,
             'day_id'       => $day_id,
             'order_by'     => 'start_date',
             'order_dir'    => 'ASC',
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['id'] = $id;
-        }
-        return $this->findCollection($this->collectionEndDate, $criteria)?->first();
+            'id'           => $id !== null ? $id : null,
+            //'with'         => ['absence', 'shiftPlanner', 'category', 'category.workTypeDays'],
+        ])->first();
     }
 
-    public function findLogPresencePending()
+    public function findPresencePending()
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'where_has' => true,
             'type'      => 'presence',
             'status'    => [1],
             'order_by'  => 'start_date',
             'order_dir' => 'ASC',
-        ];
-        return $this->findCollection($this->collection, $criteria)?->first();
+        ])->first();
     }
 
-    public function findLogOutPending(?int $id = null)
+    public function findOutPending(?int $id = null)
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'current_end' => true,
+            'where_has' => true,
             'type'      => 'presence',
             'queue'     => 2,
             'status'    => [1],
             'order_by'  => 'start_date',
             'order_dir' => 'ASC',
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['absence_id'] = $id;
-        }
-        return $this->findCollection($this->collectionEndDate, $criteria)?->first();
+            'absence_id' => $id !== null ? $id : null,
+        ])->first();
     }
 
-    public function findLogExcBreakPending(?int $id = null)
+    public function findExcBreakPending(?int $id = null)
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'current' => false,
+            'where_has' => true,
             'type'        => 'break',
             'type_not_in' => true,
             'status'      => [1],
             'order_by'    => 'start_date',
             'order_dir'   => 'ASC',
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['absence_id'] = $id;
-        }
-        return $this->findCollection($this->collectionAllDate, $criteria)?->first();
+            'absence_id' => $id !== null ? $id : null,
+        ])->first();
     }
 
-    public function findLogBreakPending(?int $id = null)
+    public function findBreakPending(?int $id = null)
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'where_has' => true,
             'type'      => 'break',
             'status'    => [1],
             'order_by'  => 'start_date',
             'order_dir' => 'ASC',
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['absence_id'] = $id;
-        }
-        return $this->findCollection($this->collection, $criteria)?->first();
+            'absence_id' => $id !== null ? $id : null,
+        ])->first();
     }
 
-    public function findLogExcuseEndPending(?int $id = null)
+    public function findExcuseEndPending(?int $id = null)
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'where_has' => true,
             'type'   => 'excuse',
             'queue'  => 2,
             'status' => [1],
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['absence_request_id'] = $id;
-        }
-        return $this->findCollection($this->collection, $criteria)?->first();
+            'absence_request_id' => $id !== null ? $id : null,
+        ])->first();
     }
 
-    public function findLogInActive()
+    public function findInActive()
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'where_has' => true,
             'type'   => 'presence',
             'queue'  => 1,
             'status' => [0],
-        ];
-        return $this->findCollection($this->collection, $criteria)?->first();
-        //return $this->collection;
+        ])->first();
     }
 
-    public function findLogVisitEndPending(?int $id = null)
+    public function findVisitEndPending(?int $id = null)
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'where_has' => true,
             'type'   => 'visit',
             'queue'  => 2,
             'status' => [1],
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['absence_request_id'] = $id;
-        }
-        return $this->findCollection($this->collection, $criteria)?->first();
+            'absence_request_id' => $id !== null ? $id : null,
+        ])->first();
     }
 
-    public function findLogExtraEndPendingAllDate(?int $id = null)
+    public function findExtraEndPending(?int $id = null)
     {
-        // base criteria
-        $criteria = [
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'where_has' => true,
             'type'   => 'extra',
             'queue'  => 2,
             'status' => [1],
-        ];
-        // add optional filter if id provided
-        if ($id !== null) {
-            $criteria['absence_request_id'] = $id;
-        }
-        return $this->findCollection($this->collectionAllDate, $criteria)?->first();
+            'absence_request_id' => $id !== null ? $id : null,
+        ])->first();
+    }
+
+    public function findExtraEndPendingAllDate(?int $id = null)
+    {
+        return AbsenceLog::filter([
+            'staff_id'  => $this->staffId,
+            'current_end' => false,
+            'where_has' => true,
+            'type'   => 'extra',
+            'queue'  => 2,
+            'status' => [1],
+            'absence_request_id' => $id !== null ? $id : null,
+        ])->first();
     }
 
     public function save(AbsenceLog $absenceLog): AbsenceLog
@@ -346,7 +172,7 @@ class AbsenceLogRepository
         return AbsenceLog::find($id);
     }
 
-    public function findBytype(string $type): ?AbsenceLog
+    public function findByType(string $type): ?AbsenceLog
     {
         return AbsenceLog::where('type', $type)->first();
     }

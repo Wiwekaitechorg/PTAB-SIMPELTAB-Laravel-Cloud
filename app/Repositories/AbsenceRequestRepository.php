@@ -2,35 +2,47 @@
 namespace App\Repositories;
 
 use App\AbsenceRequest;
-use Illuminate\Support\Collection;
 
 class AbsenceRequestRepository
 {
-    protected Collection $absence_request;
-    protected Collection $absence_request_with_pending;
-
+    protected ?int $staffId;
     public function __construct(?int $staffId = null)
     {
         if ($staffId !== null) {
-            AbsenceRequest::$baseFilter['staff_id'] = $staffId;
-
-            //general request
-            $this->absence_request              = AbsenceRequest::filter(['current' => true])->get()->groupBy('category');
-            $this->absence_request_with_pending = AbsenceRequest::filter(['status' => ['approve', 'active', 'pending']])->get()->groupBy('category');
-        } else {
-            $this->absence_request              = new Collection();
-            $this->absence_request_with_pending = new Collection();
+            $this->staffId = $staffId;
         }
     }
 
-    public function getAbsenceRequest()
+    public function findByCategoryWithPending(string $category): ?AbsenceRequest
     {
-        return $this->absence_request;
+        return AbsenceRequest::filter([
+            'staff_id' => $this->staffId,
+            'category' => $category,
+            'status'   => ['approve', 'active', 'pending'],
+        ])->first();
     }
 
-    public function getAbsenceRequestWithPending()
+    public function findByCategory(string $category): ?AbsenceRequest
     {
-        return $this->absence_request_with_pending;
+        return AbsenceRequest::filter([
+            'staff_id' => $this->staffId,
+            'category' => $category,
+        ])->first();
+    }
+
+    public function findByCategoryNotIn(string $category, array $notIn): ?AbsenceRequest
+    {
+        $filters             = [];
+        $filters['staff_id'] = $this->staffId;
+        $filters['category'] = $category;
+        // Not filters
+        foreach ($notIn as $n) {
+            foreach ($n as $col => $val) {
+                $filters[$col . '_not'] = $val;
+            }
+        }
+
+        return AbsenceRequest::filter($filters)->first();
     }
 
     public function save(AbsenceRequest $absenceRequest): AbsenceRequest
@@ -44,7 +56,7 @@ class AbsenceRequestRepository
         return AbsenceRequest::find($id);
     }
 
-    public function findBytype(string $type): ?AbsenceRequest
+    public function findByType(string $type): ?AbsenceRequest
     {
         return AbsenceRequest::where('type', $type)->first();
     }

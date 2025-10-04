@@ -5,10 +5,13 @@ namespace App;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use App\Traits\AbsenceFilter;
 
 class Absence extends Model
 {
     use HasFactory;
+    use AbsenceFilter;
+    
     protected $fillable = [
         'day_id',
         'shift_group_id',

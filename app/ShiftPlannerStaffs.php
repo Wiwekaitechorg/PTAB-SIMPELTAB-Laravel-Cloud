@@ -4,12 +4,12 @@ namespace App;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use App\Traits\ShiftPlannerStaffsFilter;
+use App\Traits\ShiftPlannerStaffFilter;
 
 class ShiftPlannerStaffs extends Model
 {
     use HasFactory;
-    use ShiftPlannerStaffsFilter;
+    use ShiftPlannerStaffFilter;
     protected $fillable = [
         'id',
         'shift_group_id',
@@ -22,15 +22,6 @@ class ShiftPlannerStaffs extends Model
     ];
 
     public static array $baseFilter = [
-        // 'current'   => true,
-        // 'start_col' => 'date',
-        // 'end_col'   => 'date',
-        // 'status'       => ['1', '0'],
-        // 'order_by_raw' => [
-        //     'FIELD(status,"active","approve")',
-        // ],
-        'order_by'     => 'id',
-        'order_dir'    => 'DESC',
         'with'         => ['shiftGroup'],
     ];
 

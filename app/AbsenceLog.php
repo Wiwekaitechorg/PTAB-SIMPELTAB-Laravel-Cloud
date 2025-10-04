@@ -46,12 +46,9 @@ class AbsenceLog extends Model
         'start_col' => 'start_date',
         'end_col'   => 'expired_date',
         'status'       => ['1', '0'],
-        // 'order_by_raw' => [
-        //     'FIELD(status,"active","approve")',
-        // ],
         'order_by'     => 'id',
         'order_dir'    => 'DESC',
-        'with'         => ['absence', 'shiftPlanner', 'category', 'category.workTypeDays'],
+        'with'         => ['absence', 'shiftPlanner', 'category'],
     ];
     
     public function absence()

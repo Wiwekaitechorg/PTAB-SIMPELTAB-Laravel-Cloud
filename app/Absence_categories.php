@@ -4,10 +4,13 @@ namespace App;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\AbsenceCategoryFilter;
 
 class Absence_categories extends Model
 {
     use HasFactory;
+    use AbsenceCategoryFilter;
+    
     protected $fillable = [
         'title',
         'time',

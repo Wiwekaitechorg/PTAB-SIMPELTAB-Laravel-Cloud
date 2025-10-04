@@ -2,1187 +2,450 @@
 namespace App\Services;
 
 use App\Absence;
-use App\AbsenceLog;
-use App\AbsenceProblem;
-use App\AbsenceRequest;
-use App\AbsenceRequestLogs;
-use App\Absence_categories;
-use App\Holiday;
 use App\MessageLog;
+use App\Repositories\AbsenceCategoryRepository;
 use App\Repositories\AbsenceLogRepository;
-use App\ShiftPlannerStaffs;
-use App\StaffSpecial;
-use App\Visit;
-use App\WorkTypeDays;
-use App\WorkUnit;
-use Illuminate\Database\QueryException;
+use App\Repositories\AbsenceRepository;
 use App\Repositories\AbsenceRequestRepository;
+use App\Repositories\ShiftGroupTimesheetRepository;
+use App\Repositories\ShiftPlannerStaffRepository;
+use App\Repositories\WorkTypeDayRepository;
+use App\StaffSpecial;
+use App\WorkUnit;
+use Illuminate\Support\Facades\Log;
 
 class AbsenceService
 {
-    // return response()->json([
-    //     'absence_request' => $absence_request,
-    //     'geofence_off'    => $geofence_off,
-    //     'Rlocation'       => $Rlocation,
-    //     'leave'           => $leave,
-    //     'permission'      => $permission,
-    //     'absence_visit'   => $absence_visit,
-    //     'visit'           => $visit,
-    // ]);
+    // --- original properties retained (including original defaults / misspellings) ---
+    protected $staff          = null;
+    protected $menu           = [];
+    protected $data           = [];
+    protected $presenceStatus = "ON";
+    protected $staffID;
+    protected $absenceRequestRepo;
+    protected $absenceLogRepo;
 
-    public function __construct(private AbsenceLogRepository $absenceLog, private AbsenceRequestRepository $absenceRequest)
-    {}
+    // repository dependencies (injected)
+    public function __construct(
+        private AbsenceLogRepository $absenceLog,
+        private AbsenceRequestRepository $absenceRequest,
+        private ShiftPlannerStaffRepository $shiftPlannerStaff,
+        private ShiftGroupTimesheetRepository $shiftGroupTimesheet,
+        private AbsenceCategoryRepository $absenceCategory,
+        private AbsenceRepository $absenceRepo,
+        private WorkTypeDayRepository $workTypeDayRepo
+    ) {}
 
     /**
-     * Get menu data for a staff member.
+     * Main method (refactored) — preserves behavior while extracting repeated logic.
      *
      * @param int $staffId
+     * @param int $shift_group_id
      * @return \Illuminate\Http\JsonResponse
      */
-    public function getMenuData($staffId, $shift_group_id)
+    public function getSession($staffId)
     {
-        // untuk menampung data menu
-        $reguler       = "";
-        $holiday       = "";
-        $break         = "";
-        $duty          = "";
-        $finish        = "";
-        $excuse_id     = "";
-        $logOutPending = [];
-
-        $excuse = [];
-        $visit  = [];
-        $duty   = [];
-        $extra  = [];
-
-        // mematikan menu
-        $menuReguler        = "OFF";
-        $menuHoliday        = "OFF";
-        $menuBreak          = "OFF";
-        $menuExcuse         = "OFF";
-        $menuVisit          = "OFF";
-        $menuDuty           = "OFF";
-        $menuFinish         = "OFF";
-        $menuExtra          = "OFF";
-        $menuLeave          = "OFF";
-        $menuWaiting        = "OFF";
-        $menuPermission     = "OFF";
-        $geofence_off       = "OFF";
-        $geofence_off_break = "OFF";
-
-        // get ID
-        $excuseC = [];
-        $visitC  = [];
-        $extraC  = [];
-
-        $absence_excuse = [];
-        $now            = now();
-
-        //base filter absence log
-        $absenceLogRepo = new AbsenceLogRepository($staffId);
-        $absenceRequestRepo = new AbsenceRequestRepository($staffId);
-
-        //general request
-        $absence_request              = $absenceRequestRepo->getAbsenceRequest();
-        $absence_request_with_pending = $absenceRequestRepo->getAbsenceRequestWithPending();
-
-        //set geofence off if there is geolocation_off, forget, AdditionalTime with approve status
-        $geofence_off = ($absence_request->has('geolocation_off') || $absence_request->has('forget') || $absence_request->has('AdditionalTime')) ? 'ON' : 'OFF';
-
-        $fingerprint = "ON";
-        $camera      = "ON";
-        $gps         = "ON";
-
-        $workUnitStaff = WorkUnit::join('staffs', 'staffs.work_unit_id', '=', 'work_units.id')
-            ->join('work_types', 'staffs.work_type_id', '=', 'work_types.id')
-            ->where('staffs.id', $staffId)->first();
-
-        $lat    = $workUnitStaff->lat;
-        $lng    = $workUnitStaff->lng;
-        $radius = $workUnitStaff->radius;
-
-        $Rlocation = $absence_request->has('location') ? $absence_request['location']->where('work_unit_id', '!=', 'approve')->first() : null;
-        if ($Rlocation) {
-            $lat    = $Rlocation->lat;
-            $lng    = $Rlocation->lng;
-            $radius = $Rlocation->radius;
+        // local repositories used in original code instantiate AbsenceLogRepository & AbsenceRequestRepository with staff id
+        $this->absenceLogRepo     = new AbsenceLogRepository($staffId);
+        $this->absenceRequestRepo = new AbsenceRequestRepository($staffId);
+        //Set Staff Attribute (reguler/shift) & Condition (geofenceoff ON/OFF, etc)
+        if (! $this->setStaffAttribute()) {
+            return response()->json($this->responseGetSession());
         }
-
-        $staff_special = StaffSpecial::select('staff_specials.*')
-            ->where('staff_id', $staffId)->whereDate('expired_date', '>=', date('Y-m-d'))->first();
-        if ($staff_special) {
-            $fingerprint = $staff_special->fingerprint;
-            $camera      = $staff_special->camera;
-            $gps         = $staff_special->gps;
+        //Check If Leave => Output
+        if ($this->isLeave()) {
+            return response()->json($this->responseGetSession());
         }
-
-        if ($gps == "OFF") {
-            $geofence_off = "ON";
+        //Else Check If Permission => Output
+        else if ($this->isPermission()) {
+            return response()->json($this->responseGetSession());
         }
-        // find in-work check duration by staff
-        $problem = AbsenceProblem::where('id', $workUnitStaff->absence_problem_id)->first();
-        $menu    = "";
-        $leave   = $absence_request->has('leave') ? $absence_request['leave']->first() : null;
-
-        $permission = $absence_request->has('permission') ? $absence_request['permission']->first() : null;
-
-        // cek apa tanggal ini ada dinas dalam kota
-        $absence_visit = $absence_request->has('visit') ? $absence_request['visit']->first() : null;
-
-        if ($absence_visit) {
-            $visit = $absenceLogRepo->findLogVisitEndPending($absence_visit->id);
-            if ($visit) {
-                $visit_id = $visit->id;
-                $visitEtc = Visit::where('absence_request_id', $visit->absence_request_id)->first();
-                if ($visitEtc) {
-                    $menuVisit = "ON";
-                } else {
-                    $menuVisit = "ACTIVE";
-                }
+        //Else Check If Duty => Output
+        else if ($this->isDuty()) {
+            return response()->json($this->responseGetSession());
+        }
+        //Else Check If Dispense => Output
+        //Else Check If Extra Old End Open => Output
+        else if ($this->isExtraOld()) {
+            return response()->json($this->responseGetSession());
+        }
+        //Else Check If Holiday
+        else if ($this->isHoliday()) {
+            //Check If Extra on Holiday => Output
+            if ($this->isExtraHoliday()) {
+                return response()->json($this->responseGetSession());
             } else {
-                $visitC = Absence_categories::where('type', 'visit')->get();
+                return response()->json($this->responseGetSession());
             }
         }
-
-        $duty = $absence_request->has('duty') ? $absence_request['duty']->first() : null;
-
-        // cek ada lembur yang belum selesai start
-        $absence_extra_active = $absenceLogRepo->findLogExtraEndPendingAllDate();
-        if ($absence_extra_active) {
-            $menu = 'OFF';
-
-            $extra = $absence_extra_active;
-
-            $absence_extra = AbsenceRequest::where('id', $absence_extra_active->absence_request_id)
-                ->first();
-
-            if ($extra) {
-                $extra_id = $extra->id;
-            } else {
-                $extraC = Absence_categories::where('type', 'extra')->get();
-            }
-            $menuExtra = "ON";
-            // }
-            if ($absence_extra->type == "outside") {
-                $geofence_off = "ON";
-            }
-
-            return response()->json([
-                'message'       => 'Success',
-                'menu'          => [
-                    'menuReguler'    => $menuReguler,
-                    'menuHoliday'    => $menuHoliday,
-                    'menuBreak'      => $menuBreak,
-                    'menuExcuse'     => $menuExcuse,
-                    'menuExtra'      => $menuExtra,
-                    'menuDuty'       => $menuDuty,
-                    'menuFinish'     => $menuFinish,
-                    'geolocationOff' => $geofence_off,
-                ],
-                'sebelum'       => 'yaa',
-                'extraC'        => $extraC,
-                'extra'         => $extra,
-                'request_extra' => $absence_extra,
-                'date'          => date('Y-m-d h:i:s'),
-                'lat'           => $lat,
-                'fingerfrint'   => $fingerprint,
-                'selfie'        => $camera,
-                'gps'           => $gps,
-                'lng'           => $lng,
-                'radius'        => $radius,
-            ]);
-        }
-
-        // cek ada lembur yang belum selsasi end
-
-        $showExtra     = "No";
-        $absence_extra = null;
-        $absenIn       = Absence::whereDate('created_at', '=', date('Y-m-d'))->where('staff_id', $staffId)->get();
-        foreach ($absenIn as $data) {
-            $c_in  = $data->absence_logs->where('absence_category_id', 1)->where('status', 0)->first();
-            $c_out = $data->absence_logs->where('absence_category_id', 2)->where('status', 0)->first();
-            if ($c_in && $c_out) {
-                $showExtra = "Yes";
-            }
-        }
-        if (count($absenIn) <= 0) {
-            $showExtra = "Yes";
-        }
-
-        if ($showExtra == "Yes") {
-            $absence_extra = $absence_request->has('extra') ? $absence_request['extra']->first() : null;
-        }
-
-        // cek hari libur
-        if ($leave) {
-
-            if ($leave->status == "pending") {
-                $menuWaiting = "ON";
-                return response()->json([
-                    'message'        => 'Success',
-                    'menu'           => [
-                        'menuReguler' => $menuReguler,
-                        'menuHoliday' => $menuHoliday,
-                        'menuBreak'   => $menuBreak,
-                        'menuExcuse'  => $menuExcuse,
-                        'menuDuty'    => $menuDuty,
-                        'menuFinish'  => $menuFinish,
-                        'menuLeave'   => $menuLeave,
-                        'menuWaiting' => $menuWaiting,
-                    ],
-                    'waitingMessage' => "Menunggu Persetujuan Cuti",
-                    'leave'          => $leave,
-                    'date'           => date('Y-m-d h:i:s'),
-                ]);
-            }
-            if ($leave->status == "close") {
-                $menuWaiting = "ON";
-                return response()->json([
-                    'message'        => 'Success',
-                    'menu'           => [
-                        'menuReguler' => $menuReguler,
-                        'menuHoliday' => $menuHoliday,
-                        'menuBreak'   => $menuBreak,
-                        'menuExcuse'  => $menuExcuse,
-                        'menuDuty'    => $menuDuty,
-                        'menuFinish'  => $menuFinish,
-                        'menuLeave'   => $menuLeave,
-                        'menuWaiting' => $menuWaiting,
-                    ],
-                    'waitingMessage' => "Menunggu Persetujuan Cuti",
-                    'leave'          => $leave,
-                    'date'           => date('Y-m-d h:i:s'),
-                ]);
-            } else {
-                $menuLeave = "ON";
-                return response()->json([
-                    'message' => 'Success',
-                    'menu'    => [
-                        'menuReguler' => $menuReguler,
-                        'menuHoliday' => $menuHoliday,
-                        'menuBreak'   => $menuBreak,
-                        'menuExcuse'  => $menuExcuse,
-                        'menuDuty'    => $menuDuty,
-                        'menuFinish'  => $menuFinish,
-                        'menuLeave'   => $menuLeave,
-                    ],
-                    'leave'   => $leave,
-                    'date'    => date('Y-m-d h:i:s'),
-                ]);
-            }
-        } else if ($permission) {
-            if ($permission->status == "pending") {
-                $menuWaiting = "ON";
-                return response()->json([
-                    'message'        => 'Success',
-                    'menu'           => [
-                        'menuReguler'    => $menuReguler,
-                        'menuHoliday'    => $menuHoliday,
-                        'menuBreak'      => $menuBreak,
-                        'menuExcuse'     => $menuExcuse,
-                        'menuDuty'       => $menuDuty,
-                        'menuFinish'     => $menuFinish,
-                        'menuWaiting'    => $menuWaiting,
-                        'menuPermission' => $menuPermission,
-                    ],
-                    'waitingMessage' => "Menunggu Persetujuan Izin",
-                    'date'           => date('Y-m-d h:i:s'),
-                ]);
-            } else if ($permission->status == "close") {
-                $menuWaiting = "ON";
-                return response()->json([
-                    'message'        => 'Success',
-                    'menu'           => [
-                        'menuReguler'    => $menuReguler,
-                        'menuHoliday'    => $menuHoliday,
-                        'menuBreak'      => $menuBreak,
-                        'menuExcuse'     => $menuExcuse,
-                        'menuDuty'       => $menuDuty,
-                        'menuFinish'     => $menuFinish,
-                        'menuWaiting'    => $menuWaiting,
-                        'menuPermission' => $menuPermission,
-                    ],
-                    'waitingMessage' => "Besok Anda Sudah Bisa Mulai Bekerja",
-                    'date'           => date('Y-m-d h:i:s'),
-                ]);
-            } else {
-
-                $menuPermission = "ON";
-                if ($permission->type == "other") {
-                    $menuWaiting    = "ON";
-                    $menuPermission = "OFF";
-                }
-                return response()->json([
-                    'message'        => 'Success',
-                    'menu'           => [
-                        'menuReguler'    => $menuReguler,
-                        'menuHoliday'    => $menuHoliday,
-                        'menuBreak'      => $menuBreak,
-                        'menuExcuse'     => $menuExcuse,
-                        'menuDuty'       => $menuDuty,
-                        'menuFinish'     => $menuFinish,
-                        'menuWaiting'    => $menuWaiting,
-                        'menuPermission' => $menuPermission,
-                    ],
-                    'permission'     => $permission,
-                    'waitingMessage' => "Anda Masih Izin",
-                    'date'           => date('Y-m-d h:i:s'),
-                ]);
-            }
-        } else if ($duty) {
-
-            if ($duty->status == "pending") {
-                $menuWaiting = "ON";
-                return response()->json([
-                    'message'        => 'Success',
-                    'fingerfrint'    => $fingerprint,
-                    'selfie'         => $camera,
-                    'menu'           => [
-                        'menuReguler' => $menuReguler,
-                        'menuHoliday' => $menuHoliday,
-                        'menuBreak'   => $menuBreak,
-                        'menuExcuse'  => $menuExcuse,
-                        'menuDuty'    => $menuDuty,
-                        'menuFinish'  => $menuFinish,
-                        'menuWaiting' => $menuWaiting,
-                    ],
-                    'waitingMessage' => "Menunggu Persetujuan Dinas Luar",
-                    'duty'           => $duty,
-                    'date'           => date('Y-m-d h:i:s'),
-                ]);
-            } else if ($duty->status == "close") {
-                $menuWaiting = "ON";
-                return response()->json([
-                    'message'        => 'Success',
-                    'fingerfrint'    => $fingerprint,
-                    'selfie'         => $camera,
-                    'menu'           => [
-                        'menuReguler' => $menuReguler,
-                        'menuHoliday' => $menuHoliday,
-                        'menuBreak'   => $menuBreak,
-                        'menuExcuse'  => $menuExcuse,
-                        'menuDuty'    => $menuDuty,
-                        'menuFinish'  => $menuFinish,
-                        'menuWaiting' => $menuWaiting,
-                    ],
-                    'waitingMessage' => "Besok Anda Sudah Bisa Mulai Bekerja",
-                    'duty'           => $duty,
-                    'date'           => date('Y-m-d h:i:s'),
-                ]);
-            } else {
-                $AbsenceRequestLogs = AbsenceRequestLogs::where('absence_request_id', $duty->id)
-                    ->where('type', 'request_log_in')
-                    ->first();
-
-                $menuDuty = 'ON';
-                return response()->json([
-                    'message'            => 'Success',
-                    'fingerfrint'        => $fingerprint,
-                    'selfie'             => $camera,
-                    'menu'               => [
-                        'menuReguler' => $menuReguler,
-                        'menuHoliday' => $menuHoliday,
-                        'menuBreak'   => $menuBreak,
-                        'menuExcuse'  => $menuExcuse,
-                        'menuDuty'    => $menuDuty,
-                        'menuFinish'  => $menuFinish,
-                    ],
-                    'AbsenceRequestLogs' => $AbsenceRequestLogs,
-                    'duty'               => $duty,
-                    'workUnitStaff'          => $workUnitStaff,
-                    'date'               => date('Y-m-d h:i:s'),
-                ]);
-            }
-        } else if ($absence_extra) {
-            $menu = 'OFF';
-
-            if ($absence_extra) {
-                $extra = $absenceLogRepo->findLogExtraEndPendingAllDate($absence_extra->id);
-            }
-            if ($extra) {
-                $extra_id = $extra->id;
-            } else {
-                $extraC = Absence_categories::where('type', 'extra')->get();
-            }
-
-            $menuExtra = "ON";
-            // }
-            if ($absence_extra->type == "outside") {
-                $geofence_off = "ON";
-            }
-
-            return response()->json([
-                'message'       => 'Success',
-                'menu'          => [
-                    'menuReguler'    => $menuReguler,
-                    'menuHoliday'    => $menuHoliday,
-                    'menuBreak'      => $menuBreak,
-                    'menuExcuse'     => $menuExcuse,
-                    'menuExtra'      => $menuExtra,
-                    'menuDuty'       => $menuDuty,
-                    'menuFinish'     => $menuFinish,
-                    'geolocationOff' => $geofence_off,
-                ],
-                'sebelum'       => 'yaa',
-                'extraC'        => $extraC,
-                'extra'         => $extra,
-                'request_extra' => $absence_extra,
-                'date'          => date('Y-m-d h:i:s'),
-                'lat'           => $lat,
-                'fingerfrint'   => $fingerprint,
-                'selfie'        => $camera,
-                'gps'           => $gps,
-                'lng'           => $lng,
-                'radius'        => $radius,
-            ]);
-        }
-        // cek jadwal kerja
+        //Else
         else {
-
-            // get log in active
-            $logInActive = $absenceLogRepo->findLogInActive();
-
-            $braeakCheck = null;
-            // if log in active
-            if ($logInActive) {
-                // get request excuse current
-                $absence_excuse = $absence_request->has('excuse') ? $absence_request['excuse']->first() : null;
-                if ($absence_excuse) {
-                    //get log excuse end pending
-                    $excuse = $absenceLogRepo->findLogExcuseEndPending($absence_excuse->id);
-
-                    if ($excuse) {
-                        $excuse_id = $excuse->id;
-                    } else {
-                        $excuseC = Absence_categories::where('type', 'excuse')->get();
-                    }
-                    $menuExcuse = "ON";
-                }
-
-                //get request visit current
-                $absence_visit = $absence_request->has('visit') ? $absence_request['visit']->first() : null;
-                if ($absence_visit) {
-                    //get log visit end pending
-                    $visit = $absenceLogRepo->findLogVisitEndPending($absence_visit->id);
-
-                    if ($visit) {
-                        $visit_id = $visit->id;
-                        $visitEtc = Visit::where('absence_request_id', $visit->absence_request_id)->first();
-                        if ($visitEtc) {
-                            $menuVisit = "ON";
-                        } else {
-                            $menuVisit = "ACTIVE";
-                            // $menuVisit = "ON";
-                        }
-                    } else {
-                        $visitC    = Absence_categories::where('type', 'visit')->get();
-                        $menuVisit = "ON";
-                    }
-
-                    // $menuVisit = "OFF";
-                }
-
-                // get log break pending
-                $break = $absenceLogRepo->findLogBreakPending();
-
-                if ($break) {
-                    $menuBreak = "ON";
-                    //if any dinas dalam active
-                    if ($menuVisit != 'OFF') {
-                        $geofence_off_break = "ON";
-                    }
-                }
-
-                // get log out pending
-                $logOutPending = $absenceLogRepo->findLogOutPending($logInActive->absence_id);
+            //Check If Presence Empty => Create Absence & Log
+            $this->isPresenceEmpty();
+            //Check If Presence Open => Output
+            if ($this->isPresenceOpen()) {
+                return response()->json($this->responseGetSession());
             }
-
-            if (date('w') == '0') {
-                $day = '7';
-            } else {
-                $day = date('w');
-            }
-
-            // get log presence pending
-            $logPresencePending = $absenceLogRepo->findLogPresencePending();
-
-            if ($logInActive) {
-                // get log exclude break pending
-                $logExcBreakPending = $absenceLogRepo->findLogExcBreakPending($logInActive->absence_id);
-
-                // get log break pending
-                $logBreakPending = $absenceLogRepo->findLogBreakPending($logInActive->absence_id);
-
-                if ($logExcBreakPending) {
-                    $logPresencePending = $logExcBreakPending;
-                } else if ($logBreakPending) {
-                    $logPresencePending = $logBreakPending;
-                } else {
-                    $logPresencePending = null;
+            //Check If Presence Active
+            else if ($this->isPresenceActive()) {
+                //Check If Break => Output
+                if ($this->isBreak()) {
+                    return response()->json($this->responseGetSession());
                 }
-            }
-
-            $a1 = "1";            
-
-            // if there is log presence pending
-            if ($logPresencePending) {
-                //if regular get log with work_type_days start & end
-                if ($logPresencePending->shift_planner_id === 0) {
-                    $absen       = $absenceLogRepo->findLogPresenceWorkTypePending($workUnitStaff->work_type_id, $day, $logPresencePending->id);
-                    $a1          = "2";
-                    $menuReguler = "ON";
-                    $reguler     = $absen;
-                } else {
-                    //if shift get log with shift_group_timesheets start & end
-                    $absen       = $absenceLogRepo->findLogPresenceShiftGroupPending($logPresencePending->shiftPlanner->shift_group_id, $logPresencePending->id);
-
-                    $a1          = "2";
-                    $menuReguler = "ON";
-                    $reguler     = $absen;
-                }   
-                return response()->json([
-                    // 'absence_request'       => $absence_request,
-                    // 'geofence_off'          => $geofence_off,
-                    // 'Rlocation'             => $Rlocation,
-                    // 'leave'                 => $leave,
-                    // 'permission'            => $permission,
-                    // 'logInActive'            => $logInActive,
-                    // 'work_type_id' => $workUnitStaff->work_type_id,
-                    // 'shift_planner_id'    => $logPresencePending->shift_planner_id,
-                    // 'logPresencePending'          => $logPresencePending,
-                    'absen'                  => $absen,
-                ]);             
-            }
-            // if no log presence pending
-            else {
-                // if shift
-                if ($workUnitStaff->type == "shift") {
-                    $a1 = "3";
-                    // buat baru start
-                    // get shift planner staff today and not yet absence log
-                    $shiftPlannerStaffNotLog = ShiftPlannerStaffs::selectRaw('shift_planner_staffs.id as shift_planner_id, shift_planner_staffs.shift_group_id')
-                        ->join('shift_groups', 'shift_planner_staffs.shift_group_id', '=', 'shift_groups.id')
-                        ->leftJoin('absence_logs', 'shift_planner_staffs.id', '=', 'absence_logs.shift_planner_id')
-                        ->where('shift_planner_staffs.staff_id', '=', $staffId)
-                        ->whereDate('shift_planner_staffs.start', '=', date('Y-m-d'))
-                        ->where('absence_logs.id', '=', null)
-                        ->orderBy('shift_groups.queue', 'ASC')
-                        ->get();
-
-                    //if there is shift planner staff today and not yet absence log
-                        if (count($shiftPlannerStaffNotLog) > 0) {
-                        foreach ($shiftPlannerStaffNotLog as $item) {
-
-                            $data = [
-                                'day_id'         => $day,
-                                'shift_group_id' => $item->shift_group_id,
-                                'staff_id'       => $staffId,
-                                'created_at'     => date('Y-m-d'),
-                            ];
-                            $absence = Absence::create($data);
-                            //get list shift group timesheets & absence_categories by shift_group_id
-                            $list_absence = ShiftGroups::selectRaw('duration, duration_exp, absence_categories.queue, type, time, start, absence_category_id,shift_group_timesheets.id as shift_group_timesheet_id ')
-                                ->join('shift_group_timesheets', 'shift_group_timesheets.shift_group_id', '=', 'shift_groups.id')
-                                ->join('absence_categories', 'shift_group_timesheets.absence_category_id', '=', 'absence_categories.id')
-                                ->where('shift_groups.id', $item->shift_group_id)
-                                ->where('absence_categories.type', '!=', "break")
-                                ->orderBy('absence_categories.queue', 'ASC')
-                                ->get();
-
-                            // create message log (notif) for each in-work check duration
-                            if ($problem) {
-                                $str_date = date("Y-m-d H:i:s", strtotime(date('Y-m-d ' . $list_absence[0]->time)));
-                                $exp_date = date("Y-m-d H:i:s", strtotime('+ ' . (($list_absence[0]->duration - $problem->duration) * 60) . ' minutes', strtotime(date('Y-m-d ' . $list_absence[0]->time))));
-
-                                $i = 0;
-                                // looping insert message log while in-work check duration
-                                while ($str_date < $exp_date) {
-                                    $i        = +$problem->duration;
-                                    $str_date = date("Y-m-d H:i:s", strtotime('+ ' . $i * 60 . ' minutes', strtotime($str_date)));
-                                    // $d[] = [$str_date];
-                                    $message = "Anda Dalam Pengawasan, Buka Untuk Absen Lokasi";
-                                    MessageLog::create([
-                                        'staff_id'   => $staffId,
-                                        'memo'       => $message,
-                                        'type'       => 'check',
-                                        'status'     => 'pending',
-                                        'created_at' => $str_date,
-                                    ]);
-                                }
-                            }
-
-                            // try save absence log for each list
-                            try {
-                                // Base data always taken from the first element
-                                $baseDuration    = $list_absence[0]->duration;
-                                $baseDurationExp = $list_absence[0]->duration_exp;
-                                $baseTime        = strtotime(date('Y-m-d ' . $list_absence[0]->time));
-
-                                $timein       = date("Y-m-d H:i:s", $baseTime);
-                                $timeout      = date("Y-m-d H:i:s", strtotime("+{$baseDuration} minutes", $baseTime));
-                                $expired_date = date(
-                                    "Y-m-d H:i:s",
-                                    strtotime('+' . ($baseDuration + $baseDurationExp) . ' minutes', $baseTime)
-                                );
-
-                                foreach ($list_absence as $index => $absenceItem) {
-
-                                    // Status logic stays the same
-                                    $status = 0;
-                                    if ($index === count($list_absence) - 1) {
-                                        $status = 1;
-                                    } elseif ($index === 2 && $absenceItem->type === "break") {
-                                        $status = 1;
-                                    }
-
-                                    // Start date logic (based on queue)
-                                    if ($absenceItem->queue == 1) {
-                                        $start_date = date("Y-m-d H:i:s", strtotime("-{$baseDurationExp} minutes", $baseTime));
-                                    } else {
-                                        $start_date = date("Y-m-d H:i:s", strtotime("+{$baseDuration} minutes", $baseTime));
-                                    }
-
-                                    // New instance for each log
-                                    $absenceLog                           = new AbsenceLog();
-                                    $absenceLog->absence_id               = $absence->id;
-                                    $absenceLog->shift_planner_id         = $item->shift_planner_id;
-                                    $absenceLog->shift_group_timesheet_id = $absenceItem->shift_group_timesheet_id;
-                                    $absenceLog->timein                   = $timein;
-                                    $absenceLog->timeout                  = $timeout;
-                                    $absenceLog->start_date               = $start_date;
-                                    $absenceLog->expired_date             = $expired_date;
-                                    $absenceLog->created_at               = now();
-                                    $absenceLog->updated_at               = now();
-                                    $absenceLog->status                   = $status;
-                                    $absenceLog->absence_category_id      = $absenceItem->absence_category_id;
-
-                                    $absenceLog->save();
-                                }
-                            } catch (QueryException $ex) {
-                                return response()->json(['message' => 'gagal']);
-                            }
-
-                        }
-                        // test start
-                        if (date('w') == '0') {
-                            $day = '7';
-                        } else {
-                            $day = date('w');
-                        }
-
-                        // find today's presence pending
-                        $logPresencePending = $absenceLogRepo->findLogPresencePending();
-                        $a1                 = "1";
-                        $absen              = "";
-                        // jika ada absen hari ini
-                        if ($logPresencePending) {
-                            if ($logPresencePending->shift_planner_id === 0) {
-                                $absen       = $absenceLogRepo->findLogPresenceWorkTypePending($workUnitStaff->work_type_id, $day, $logPresencePending->id);
-                                $a1          = "2";
-                                $menuReguler = "ON";
-                                $reguler     = $absen;
-                            } else {
-                                //if shift get log with shift_group_timesheets start & end
-                                $absen       = $absenceLogRepo->findLogPresenceShiftGroupPending($logPresencePending->shiftPlanner->shift_group_id, $logPresencePending->id);
-                                $reguler     = $absen;
-                                $a1          = "2";
-                                $menuReguler = "ON";
-                            }
-
-                            return response()->json([
-                                'lat'         => $lat,
-                                'fingerfrint' => $fingerprint,
-                                'selfie'      => $camera,
-                                'gps'         => $gps,
-                                'lng'         => $lng,
-                                'radius'      => $radius,
-                                'reguler'     => $reguler,
-                                'work_type'   => $workUnitStaff->work_type_id,
-                                'menu'        => [
-                                    'menuReguler'    => $menuReguler,
-                                    'menuHoliday'    => $menuHoliday,
-                                    'menuBreak'      => $menuBreak,
-                                    'menuExcuse'     => $menuExcuse,
-                                    'menuDuty'       => $menuDuty,
-                                    'menuFinish'     => $menuFinish,
-                                    'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                ],
-                                'break'       => $break,
-                                'date'        => $workUnitStaff->type,
-                                'absence'     => $logPresencePending,
-                                'tesss'       => $absen,
-                                'a1'          => $a1,
-                            ]);
-                        }
-
-                        // test end
-                    } else {
-                        // if there is no shift planner staff today and not yet absence log
-                        if (! $logOutPending) {
-                            if (date('Y-m-d H:i:s') > date('Y-m-d 21:00:00') && date('Y-m-d H:i:s') < date('Y-m-d 23:59:59') || date('Y-m-d H:i:s') > date('Y-m-d 01:00:00') && date('Y-m-d H:i:s') < date('Y-m-d 06:00:00')) {
-                                $absence_extra = $absence_request_with_pending->has('extra') ? $absence_request_with_pending['extra']->first() : null;
-                            } else {
-                                $absence_extra = $absence_request->has('extra') ? $absence_request['extra']->first() : null;
-                            }
-
-                            if ($absence_extra) {
-                                $menu = 'OFF';
-                                if ($absence_extra) {
-                                    $extra = AbsenceLog::selectRaw('absence_logs.status, absence_request_id , absence_id, absence_categories.type as absence_category_type, absence_logs.expired_date,shift_planner_id, queue, status_active, absence_categories.id as absence_category_id, absence_logs.id as id')
-                                        ->leftJoin('absences', 'absence_logs.absence_id', '=', 'absences.id')
-                                        ->leftJoin('absence_categories', 'absence_logs.absence_category_id', '=', 'absence_categories.id')
-                                        ->where('staff_id', $staffId)
-                                        ->where('absence_request_id', $absence_extra->id)
-                                        ->where('absence_logs.start_date', '<=', date('Y-m-d H:i:s'))
-                                        ->where('absence_logs.expired_date', '>=', date('Y-m-d H:i:s'))
-                                        ->where('absence_logs.status', '=', 1)
-                                        ->where('absence_categories.type', '=', 'extra')
-                                        ->where('absence_categories.queue', '=', '2')
-                                        ->orderBy('absence_logs.id', 'DESC')
-                                        ->first();
-                                    if ($extra) {
-                                        $extra_id = $extra->id;
-                                    } else {
-                                        $extraC = Absence_categories::where('type', 'extra')->get();
-                                    }
-                                    $menuExtra = "ON";
-                                }
-                                if ($absence_extra->type == "outside") {
-                                    $geofence_off = "ON";
-                                }
-
-                                return response()->json([
-                                    'message'       => 'Success',
-                                    'menu'          => [
-                                        'menuReguler'    => $menuReguler,
-                                        'menuHoliday'    => $menuHoliday,
-                                        'menuBreak'      => $menuBreak,
-                                        'menuExcuse'     => $menuExcuse,
-                                        'menuExtra'      => $menuExtra,
-                                        'menuDuty'       => $menuDuty,
-                                        'menuFinish'     => $menuFinish,
-                                        'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                    ],
-                                    'extraC'        => $extraC,
-                                    'extra'         => $extra,
-                                    'request_extra' => $absence_extra,
-                                    'date'          => date('Y-m-d h:i:s'),
-                                    'lat'           => $lat,
-                                    'fingerfrint'   => $fingerprint,
-                                    'selfie'        => $camera,
-                                    'gps'           => $gps,
-                                    'selfie'        => $camera,
-                                    'lng'           => $lng,
-                                    'radius'        => $radius,
-                                ]);
-                            } else {
-                                $menuWaiting = "ON";
-                                return response()->json([
-                                    'message'        => 'Absen Terkirim',
-                                    'message'        => 'sudah pulang',
-                                    'data'           => $shiftPlannerStaffNotLog,
-                                    'radius'         => $radius,
-                                    'reguler'        => $reguler,
-                                    'break'          => $break,
-                                    'menu'           => [
-                                        'menuBreak'      => $menuBreak,
-                                        'menuExcuse'     => $menuExcuse,
-                                        'menuReguler'    => $menuReguler,
-                                        'menuHoliday'    => $menuHoliday,
-                                        'menuDuty'       => $menuDuty,
-                                        'menuFinish'     => $menuFinish,
-                                        'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                        'menuWaiting'    => $menuWaiting,
-
-                                    ],
-                                    'waitingMessage' => "Absen Sudah Selesai",
-                                ]);
-                            }
-                        } else {
-                            // if there is shift planner staff today and already absence log
-                            return response()->json([
-                                'message'        => 'Absen Terkirim',
-                                'message'        => 'ssssssa',
-                                'excuseC'        => $excuseC,
-                                'excuse'         => $excuse,
-                                'request_excuse' => $absence_excuse,
-                                'visitC'         => $visitC,
-                                'visit'          => $visit,
-                                'request_visit'  => $absence_visit,
-                                'data'           => $shiftPlannerStaffNotLog,
-
-                                'lat'            => $lat,
-                                'fingerfrint'    => $fingerprint,
-                                'selfie'         => $camera,
-                                'gps'            => $gps,
-                                'lng'            => $lng,
-                                'radius'         => $radius,
-                                'reguler'        => $reguler,
-                                'break'          => $break,
-                                'absenceOut'     => $logOutPending,
-                                'menu'           => [
-                                    'menuBreak'      => $menuBreak,
-                                    'menuExcuse'     => $menuExcuse,
-                                    'menuReguler'    => $menuReguler,
-                                    'menuHoliday'    => $menuHoliday,
-                                    'menuVisit'      => $menuVisit,
-                                    'menuDuty'       => $menuDuty,
-                                    'menuFinish'     => $menuFinish,
-                                    'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                ],
-                            ]);
-                        }
-                    }
-
-                    // buat baru end
+                //Else Check If Visit => Output
+                else if ($this->isVisit()) {
+                    return response()->json($this->responseGetSession());
                 }
-                // if regular
+                //Else Check If Excuse => Output
+                else if ($this->isExcuse()) {
+                    return response()->json($this->responseGetSession());
+                }
+                //Else Output
                 else {
-                    // absence Biasa
-                    $holiday = Holiday::whereDate('start', '<=', date('Y-m-d'))->whereDate('end', '>=', date('Y-m-d'))->first();
-                    // cek hari libur
-                    if ($holiday) {
-                        $menu = 'OFF';
-                        return response()->json([
-                            'message' => 'Success',
-                            'menu'    => [
-                                'menuReguler'    => $menuReguler,
-                                'menuHoliday'    => $menuHoliday,
-                                'menuBreak'      => $menuBreak,
-                                'menuExcuse'     => $menuExcuse,
-                                'menuDuty'       => $menuDuty,
-                                'menuFinish'     => $menuFinish,
-                                'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                            ],
-                            'date'    => date('Y-m-d h:i:s'),
-                        ]);
-                    } else {
-                        $absen = Absence_categories::selectRaw('absence_categories.*, work_type_days.start, work_type_days.end')
-                            ->join('work_type_days', 'work_type_days.absence_category_id', '=', 'absence_categories.id')
-                            ->join('work_types', 'work_type_days.work_type_id', '=', 'work_types.id')
-                            ->where('work_types.id', $workUnitStaff->work_type_id)
-                            ->where('day_id', $day)
-                            ->first();
-
-                        // return response()->json([
-                        //     'abs' => $absen,
-                        // ]);
-
-                        // buat baru start
-                        // cek apa sudah ada group absen di tanggal ini
-                        if ($absen) {
-                            $c = Absence::join('absence_logs', 'absences.id', '=', 'absence_logs.absence_id')
-                                ->whereDate('absences.created_at', '=', date('Y-m-d'))
-                                ->whereNotIn('absence_category_id', [9, 10])
-                                ->where('staff_id', $staffId)->first();
-                            if (! $c) {
-                                $data = [
-                                    'day_id'         => $day,
-                                    'shift_group_id' => $shift_group_id,
-                                    'staff_id'       => $staffId,
-                                    'created_at'     => date('Y-m-d'),
-                                ];
-                                $absence      = Absence::create($data);
-                                $list_absence = WorkTypeDays::selectRaw('duration, duration_exp, queue, type, time, start, absence_category_id,work_type_days.id as work_type_day_id ')
-                                    ->join('absence_categories', 'work_type_days.absence_category_id', '=', 'absence_categories.id')
-                                    ->where('work_type_id', $workUnitStaff->work_type_id)
-                                    ->where('day_id', $day)
-                                    ->where('absence_categories.type', '=', 'presence')
-                                    ->orderBy('queue', 'ASC')
-                                    ->get();
-
-                                // absen bermsalah start
-                                if ($problem) {
-                                    $str_date = date("Y-m-d H:i:s", strtotime(date('Y-m-d ' . $list_absence[0]->time)));
-                                    $exp_date = date("Y-m-d H:i:s", strtotime('+ ' . (($list_absence[0]->duration - $problem->duration) * 60) . ' minutes', strtotime(date('Y-m-d ' . $list_absence[0]->time))));
-
-                                    $i = 0;
-                                    while ($str_date < $exp_date) {
-                                        $i        = +$problem->duration;
-                                        $str_date = date("Y-m-d H:i:s", strtotime('+ ' . $i * 60 . ' minutes', strtotime($str_date)));
-                                        // $d[] = [$str_date];
-                                        $message = "Anda Dalam Pengawasan, Buka Untuk Absen Lokasi";
-                                        MessageLog::create([
-                                            'staff_id'   => $staffId,
-                                            'memo'       => $message,
-                                            'type'       => 'check',
-                                            'status'     => 'pending',
-                                            'created_at' => $str_date,
-                                        ]);
-                                    }
-                                }
-
-                                // absence bermsalah end
-                                $expired_date = date('Y-m-d H:i:s');
-                                try {
-                                    for ($n = 0; $n < count($list_absence); $n++) {
-                                        $expired_date = date("Y-m-d H:i:s", strtotime('+' . (($list_absence[0]->duration + $list_absence[0]->duration_exp) * 60) . ' minutes', strtotime(date('Y-m-d ' . $list_absence[0]->time))));
-                                        $timeout      = date("Y-m-d H:i:s", strtotime('+' . ($list_absence[0]->duration * 60) . ' minutes', strtotime(date('Y-m-d ' . $list_absence[0]->time))));
-                                        $timein       = date("Y-m-d H:i:s", strtotime(date('Y-m-d ' . $list_absence[0]->time)));
-
-                                        // $status = 0;
-                                        // if ($n === (count($list_absence) - 1)) {
-                                        //     $status =  1;
-                                        // } else if ($n === 2 && $list_absence[$n]->type == "break") {
-                                        //     $status =  1;
-                                        // } else {
-                                        //     $status =  0;
-                                        // }
-
-                                        // if ($list_absence[$n]->start == "0000-00-00") {
-                                        //     $start_date =  null;
-                                        // } else {
-                                        // $start_date = date("Y-m-d H:i:s", strtotime('- ' . $list_absence[$n]->duration_exp . ' minutes', strtotime(date('Y-m-d ' . $list_absence[$n]->time))));
-                                        // }
-                                        if ($list_absence[$n]->queue == "1") {
-                                            $start_date = date("Y-m-d H:i:s", strtotime('- ' . ($list_absence[0]->duration_exp * 60) . ' minutes', strtotime(date('Y-m-d ' . $list_absence[0]->time))));
-                                        } else {
-                                            $start_date = date("Y-m-d H:i:s", strtotime('+ ' . ($list_absence[0]->duration * 60) . ' minutes', strtotime(date('Y-m-d ' . $list_absence[0]->time))));
-                                        }
-                                        $upload_image = new AbsenceLog;
-                                        // sementara start
-                                        $upload_image->absence_id       = $absence->id;
-                                        $upload_image->start_date       = $start_date;
-                                        $upload_image->expired_date     = $expired_date;
-                                        $upload_image->work_type_day_id = $list_absence[$n]->work_type_day_id;
-                                        $upload_image->timein           = $timein;
-                                        $upload_image->timeout          = $timeout;
-                                        // sementara end
-                                        $upload_image->created_at          = date('Y-m-d H:i:s');
-                                        $upload_image->updated_at          = date('Y-m-d H:i:s');
-                                        $upload_image->status              = 1;
-                                        $upload_image->absence_category_id = $list_absence[$n]->absence_category_id;
-                                        // $upload_image->shift_id = $request->shift_id;
-                                        $upload_image->save();
-                                    }
-
-                                    // cek absen, apa ada absen hari ini
-                                    $absence = AbsenceLog::selectRaw('absence_logs.expired_date,shift_planner_id, queue, status_active, absence_categories.id as absence_category_id, absences.id as absence_id, absence_logs.id as id')
-                                        ->leftJoin('absences', 'absence_logs.absence_id', '=', 'absences.id')
-                                        ->leftJoin('absence_categories', 'absence_logs.absence_category_id', '=', 'absence_categories.id')
-                                        ->where('staff_id', $staffId)
-                                        ->where('absence_logs.start_date', '<=', date('Y-m-d H:i:s'))
-                                        ->where('absence_logs.expired_date', '>=', date('Y-m-d H:i:s'))
-                                        ->where('absence_logs.status', '=', 1)
-                                        ->where('absence_categories.type', '=', 'presence')
-                                        ->orderBy('absence_logs.start_date', 'ASC')
-                                        ->first();
-                                    $a1    = "1";
-                                    $absen = "";
-
-                                    // jika ada absen hari ini
-                                    if ($absence) {
-                                        if ($absence->shift_planner_id === 0) {
-                                            $absen = AbsenceLog::selectRaw('absence_categories.*,absence_logs.id as id, absence_id, work_type_days.start, work_type_days.end')
-                                                ->join('absence_categories', 'absence_categories.id', '=', 'absence_logs.absence_category_id')
-                                                ->join('work_type_days', 'work_type_days.absence_category_id', '=', 'absence_categories.id')
-                                                ->join('work_types', 'work_type_days.work_type_id', '=', 'work_types.id')
-                                                ->where('work_types.id', $workUnitStaff->work_type_id)
-                                                ->where('absence_logs.id', $absence->id)
-                                                ->where('absence_categories.type', '=', 'presence')
-                                                ->where('absence_logs.status', '=', 1)
-                                                ->first();
-                                            $a1          = "2";
-                                            $menuReguler = "ON";
-                                            $reguler     = $absen;
-                                        } else {
-                                            $absen = AbsenceLog::selectRaw('absence_logs.*, shift_group_timesheets.start, shift_group_timesheets.end')
-                                                ->leftJoin('absences', 'absences.id', '=', 'absence_logs.absence_id')
-                                                ->join('absence_categories', 'absence_categories.id', '=', 'absence_logs.absence_category_id')
-                                                ->join('shift_group_timesheets', 'absence_categories.id', '=', 'shift_group_timesheets.absence_category_id')
-                                                ->where('absence_logs.status', '=', 1)
-                                                ->where('absence_logs.id', $absence->id)
-                                                ->where('absence_categories.type', '=', 'presence')
-                                                ->orderBy('absence_logs.id', 'DESC')
-                                                ->first();
-
-                                            $a1 = "2";
-                                        }
-                                        return response()->json([
-                                            'lat'         => $lat,
-                                            'fingerfrint' => $fingerprint,
-                                            'selfie'      => $camera,
-                                            'gps'         => $gps,
-                                            'lng'         => $lng,
-                                            'radius'      => $radius,
-                                            'reguler'     => $reguler,
-                                            'work_type'   => $workUnitStaff->work_type_id,
-                                            'menu'        => [
-                                                'menuReguler'    => $menuReguler,
-                                                'menuHoliday'    => $menuHoliday,
-                                                'menuBreak'      => $menuBreak,
-                                                'menuExcuse'     => $menuExcuse,
-                                                'menuDuty'       => $menuDuty,
-                                                'menuFinish'     => $menuFinish,
-                                                'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                            ],
-                                            'break'       => $break,
-                                            'date'        => $workUnitStaff->type,
-                                            'absence'     => $absence,
-                                            'tesss'       => $absen,
-                                            'a1'          => $a1,
-                                        ]);
-                                    }
-                                    // test end
-                                } catch (QueryException $ex) {
-                                    return response()->json([
-                                        'message' => 'gagal',
-                                    ]);
-                                }
-                            }
-
-                            if (! $logOutPending) {
-                                if (date('Y-m-d H:i:s') > date('Y-m-d 21:00:00') && date('Y-m-d H:i:s') < date('Y-m-d 23:59:59') || date('Y-m-d H:i:s') > date('Y-m-d 01:00:00') && date('Y-m-d H:i:s') < date('Y-m-d 06:00:00')) {
-                                    $absence_extra = $absence_request_with_pending->has('extra') ? $absence_request_with_pending['extra']->first() : null;
-                                } else {
-                                    $absence_extra = $absence_request->has('extra') ? $absence_request['extra']->first() : null;
-                                }
-
-                                if ($absence_extra) {
-                                    $menu = 'OFF';
-                                    if ($absence_extra) {
-                                        $extra = AbsenceLog::selectRaw('absence_logs.status, absence_request_id , absence_id, absence_categories.type as absence_category_type, absence_logs.expired_date,shift_planner_id, queue, status_active, absence_categories.id as absence_category_id, absence_logs.id as id')
-                                            ->leftJoin('absences', 'absence_logs.absence_id', '=', 'absences.id')
-                                            ->leftJoin('absence_categories', 'absence_logs.absence_category_id', '=', 'absence_categories.id')
-                                            ->where('staff_id', $staffId)
-                                            ->where('absence_request_id', $absence_extra->id)
-                                            ->where('absence_logs.start_date', '<=', date('Y-m-d H:i:s'))
-                                            ->where('absence_logs.expired_date', '>=', date('Y-m-d H:i:s'))
-                                            ->where('absence_logs.status', '=', 1)
-                                            ->where('absence_categories.type', '=', 'extra')
-                                            ->where('absence_categories.queue', '=', '2')
-                                            ->orderBy('absence_logs.id', 'DESC')
-                                            ->first();
-                                        if ($extra) {
-                                            $extra_id = $extra->id;
-                                        } else {
-                                            $extraC = Absence_categories::where('type', 'extra')->get();
-                                        }
-                                        $menuExtra = "ON";
-                                    }
-                                    if ($absence_extra->type == "outside") {
-                                        $geofence_off = "ON";
-                                    }
-
-                                    return response()->json([
-                                        'message'       => 'Success',
-                                        'menu'          => [
-                                            'menuReguler'    => $menuReguler,
-                                            'menuHoliday'    => $menuHoliday,
-                                            'menuBreak'      => $menuBreak,
-                                            'menuExcuse'     => $menuExcuse,
-                                            'menuExtra'      => $menuExtra,
-                                            'menuDuty'       => $menuDuty,
-                                            'menuFinish'     => $menuFinish,
-                                            'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                        ],
-                                        'extraC'        => $extraC,
-                                        'extra'         => $extra,
-                                        'request_extra' => $absence_extra,
-                                        'date'          => date('Y-m-d h:i:s'),
-                                        'lat'           => $lat,
-                                        'fingerfrint'   => $fingerprint,
-                                        'selfie'        => $camera,
-                                        'gps'           => $gps,
-                                        'lng'           => $lng,
-                                        'radius'        => $radius,
-                                    ]);
-                                } else {
-                                    $menuWaiting = "ON";
-                                    return response()->json([
-                                        'message'        => 'Absen Terkirim',
-                                        'message'        => 'sudah pulang',
-                                        'data'           => $c,
-                                        'radius'         => $radius,
-                                        'reguler'        => $reguler,
-                                        'break'          => $break,
-                                        'menu'           => [
-                                            'menuBreak'      => $menuBreak,
-                                            'menuExcuse'     => $menuExcuse,
-                                            'menuReguler'    => $menuReguler,
-                                            'menuHoliday'    => $menuHoliday,
-                                            'menuDuty'       => $menuDuty,
-                                            'menuFinish'     => $menuFinish,
-                                            'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                            'menuWaiting'    => $menuWaiting,
-                                        ],
-                                        'waitingMessage' => "Absen Sudah Selesai",
-                                    ]);
-                                }
-                            } else {
-                                return response()->json([
-                                    'message'        => 'Absen Terkirim',
-                                    'message'        => 'ssssssa',
-                                    'excuseC'        => $excuseC,
-                                    'excuse'         => $excuse,
-                                    'request_excuse' => $absence_excuse,
-                                    'visitC'         => $visitC,
-                                    'visit'          => $visit,
-                                    'request_visit'  => $absence_visit,
-                                    'data'           => $c,
-
-                                    'lat'            => $lat,
-                                    'fingerfrint'    => $fingerprint,
-                                    'selfie'         => $camera,
-                                    'gps'            => $gps,
-                                    'lng'            => $lng,
-                                    'radius'         => $radius,
-                                    'reguler'        => $reguler,
-                                    'break'          => $break,
-                                    'absenceOut'     => $logOutPending,
-                                    'menu'           => [
-                                        'menuBreak'      => $menuBreak,
-                                        'menuExcuse'     => $menuExcuse,
-                                        'menuReguler'    => $menuReguler,
-                                        'menuHoliday'    => $menuHoliday,
-                                        'menuVisit'      => $menuVisit,
-                                        'menuDuty'       => $menuDuty,
-                                        'menuFinish'     => $menuFinish,
-                                        'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                                    ],
-                                ]);
-                            }
-                        }
-                        // buat baru end
-                        $a1 = "4";
-                    }
+                    return response()->json($this->responseGetSession());
                 }
             }
+            //Check If Presence Closed => Output
+            else if ($this->isPresenceClosed()) {
+                //Check If Extra on Presence Closed => Output
+                if ($this->isExtraPresenceClosed()) {
+                    return response()->json($this->responseGetSession());
+                } else {
+                    return response()->json($this->responseGetSession());
+                }
+            }
+        }
+    }
 
-            // pentingg dirubah
-            return response()->json([
-                'message'        => 'Absen Terkirim',
-                'message'        => 'ssssssa',
-                // 'data' =>   $c,
+    // -------------------------
+    // Helper methods extracted
+    // -------------------------
 
-                'excuseC'        => $excuseC,
-                'excuse'         => $excuse,
-                'request_excuse' => $absence_excuse,
+    private function getDayNumber()
+    {
+        return date('w') == '0' ? '7' : date('w');
+    }
 
-                'visitC'         => $visitC,
-                'visit'          => $visit,
-                'request_visit'  => $absence_visit,
-                // 'data' =>   $c,
+    private function isNightWindow()
+    {
+        $now = date('Y-m-d H:i:s');
+        return (($now > date('Y-m-d 21:00:00') && $now < date('Y-m-d 23:59:59')) ||
+            ($now > date('Y-m-d 01:00:00') && $now < date('Y-m-d 06:00:00')));
+    }
 
-                'lat'            => $lat,
-                'fingerfrint'    => $fingerprint,
-                'selfie'         => $camera,
-                'gps'            => $gps,
-                'lng'            => $lng,
-                'radius'         => $radius,
-                'reguler'        => $reguler,
-                'break'          => $break,
-                'absenceOut'     => $logOutPending,
-                'menu'           => [
-                    'menuBreak'      => $menuBreak,
-                    'menuExcuse'     => $menuExcuse,
-                    'menuReguler'    => $menuReguler,
-                    'menuHoliday'    => $menuHoliday,
-                    'menuVisit'      => $menuVisit,
-                    'menuDuty'       => $menuDuty,
-                    'menuFinish'     => $menuFinish,
-                    'geolocationOff' => $geofence_off_break == 'ON' ? $geofence_off_break : $geofence_off,
-                ],
+    /**
+     * Centralized response builder (keeps original shape)
+     */
+    private function responseGetSession()
+    {
+        return [
+            'staff'          => $this->staff,
+            'menu'           => $this->menu,
+            'data'           => $this->data,
+            'presenceStatus' => $this->presenceStatus,
+        ];
+    }
+
+    /**
+     * Set Staff Attribute (reguler/shift) & Condition (geofenceoff ON/OFF, etc)
+     */
+    private function setStaffAttribute()
+    {
+        // staff attributes by joining work_units, staffs, work_types
+        $this->staff = WorkUnit::join('staffs', 'staffs.work_unit_id', '=', 'work_units.id')
+            ->join('work_types', 'staffs.work_type_id', '=', 'work_types.id')
+            ->where('staffs.id', $this->staffId)->first();
+        // if no staff found
+        if (! $this->staff) {
+            return false;
+        }
+
+        // set base geofence flag (original logic)
+        $this->staff->geolocationOff = ($this->absenceRequestRepo->findByCategory('geolocation_off') || $this->absenceRequestRepo->findByCategory('forget') || $this->absenceRequestRepo->findByCategory('AdditionalTime')) ? 'ON' : 'OFF';
+
+        // location override request (original method: findByCategoryNotIn)
+        $location = $this->absenceRequestRepo->findByCategory('location') ? $this->absenceRequestRepo->findByCategoryNotIn('location', [['work_unit_id' => 'approve']]) : null;
+        if ($location) {
+            $this->staff->lat    = $location->lat;
+            $this->staff->lng    = $location->lng;
+            $this->staff->radius = $location->radius;
+        }
+
+        // staff special overrides for fingerprint/selfie/gps
+        $staffSpecial = StaffSpecial::select('staff_specials.*')
+            ->where('staff_id', $staffId)->whereDate('expired_date', '>=', date('Y-m-d'))->first();
+        if ($staffSpecial) {
+            $this->staff->fingerfrint = $staffSpecial->fingerprint;
+            $this->staff->selfie      = $staffSpecial->camera;
+            $this->staff->gps         = $staffSpecial->gps;
+        }
+
+        // if gps disabled -> geolocationOff ON
+        if ($this->staff->gps == "OFF") {
+            $this->staff->geolocationOff = "ON";
+        }
+
+        return true;
+    }
+
+    /**
+     * Session Leave
+     */
+    private function isLeave()
+    {
+        // Check if Request Active (category 'leave' status is 'approve' or 'active', if type 'sick' filter by date start, if 'other' filter by date currently)
+        $leave         = $this->absenceRequestRepo->findByCategory('leave');
+        // if success => push menu 'leave', data.leave = Request Active, presenceStatus = OFF, return true
+        if ($leave) {
+            $this->menu[]        = 'leave';
+            $this->data['leave'] = $leave;
+            $this->presenceStatus = "OFF";
+            return true;
+        }
+        // else return false
+        return false;
+    }
+
+    /**
+     * Session Permission
+     */
+    private function isPermission()
+    {
+        // Check if Request Active (category 'permission' status is 'approve' or 'active', if type 'sick' filter by date start, if 'other' filter by date currently)
+        // if success => push menu 'permission', data.permission = Request Active, presenceStatus = OFF, return true
+        // else return false
+    }
+
+    /**
+     * Session Duty
+     */
+    private function isDuty()
+    {
+        // Check if Request Active (category 'duty' status is 'approve' or 'active' filter by date currently)
+        // if success => push menu 'duty', data.duty = Request Active, data.dutyLog = Log Open Related order by id asc, presenceStatus = OFF, return true
+        // else return false
+    }
+
+    /**
+     * Session Extra Old
+     */
+    private function isExtraOld()
+    {
+        // Check if Log Active Expired
+        // if success => push menu 'extra', data.extra = Request Related, data.extraLog = Log Active Expired, staff.geofenceOff = Request Related type == outside ? ON:OFF, return true
+        // else return false
+    }
+
+    /**
+     * Session Holiday
+     */
+    private function isHoliday()
+    {
+        // Check if Holiday Active (by staff work type)
+        // if success => presenceStatus = OFF, return true
+        // else return false
+    }
+
+    /**
+     * Session Extra on Holiday
+     */
+    private function isExtraHoliday()
+    {
+        // Check if Request Active & Check if Holiday Active
+        // if success => push menu 'extra', data.extra = Request Active, data.extraLog = Log Open Related  order by id asc, staff.geofenceOff = Request Active type == outside ? ON:OFF, return true
+        // else return false
+    }
+
+    /**
+     * Session Presence Empty
+     */
+    private function isPresenceEmpty()
+    {
+        // Check if Log Empty & presenceStatus is ON
+        // if success => Create Absence & Log (by staff work type)
+        // return true
+    }
+
+    /**
+     * Session Presence Open
+     */
+    private function isPresenceOpen()
+    {
+        // Check if Log Open
+        // if success => push menu 'presence', data.presenceLog = Log Open order by id asc, return true
+        // else return false
+    }
+
+    /**
+     * Session Presence Active
+     */
+    private function isPresenceActive()
+    {
+        // Check if Log Active
+        // if success => return true
+        // else return false
+    }
+
+    /**
+     * Check Break (isBreak)
+     */
+    private function isBreak()
+    {
+        // Check If Log Open & Presence Active
+        // if success => push menu 'break', data.breakLog = Log Open order by id asc, return true
+        // else return false
+    }
+
+    /**
+     * Check Visit (isVisit)
+     */
+    private function isVisit()
+    {
+        // Check if Request Active & Presence Active
+        // if success => push menu 'visit', data.visit = Request Active, data.visitLog = Log Open Related order by id asc, data.inVisit = Visit (table), return true
+        // else return false
+    }
+
+    /**
+     * Check Excuse (isExcuse)
+     */
+    private function isExcuse()
+    {
+        // Check if Request Active & Presence Active
+        // if success => push menu 'excuse', data.excuse = Request Active, data.excuseLog = Log Open Related order by id asc, return true
+        // else return false
+    }
+
+    /**
+     * Check Presence Closed (isPresenceClosed)
+     */
+    private function isPresenceClosed()
+    {
+        // Check if Log Closed
+        // if success => return true
+        // else return false
+    }
+
+    /**
+     * Check Extra on Presence Closed (isExtraPresenceClosed())
+     */
+    private function isExtraPresenceClosed()
+    {
+        // Check if Request Active & Check if Presence Closed
+        // if success => push menu 'extra', data.extra = Request Active, data.extraLog = Log Open Related order by id asc, staff.geofenceOff = Request Active type == outside ? ON:OFF, return true
+        // else return false
+    }
+
+    /**
+     * Create message logs for problem duration (original logic) — made robust
+     */
+    private function createProblemMessageLogs($staffId, $firstScheduleItem, $problem)
+    {
+        if (! $firstScheduleItem) {
+            return;
+        }
+
+        $str_date = date("Y-m-d H:i:s", strtotime(date('Y-m-d ' . $firstScheduleItem->time)));
+        $exp_date = date("Y-m-d H:i:s", strtotime('+ ' . (($firstScheduleItem->duration - $problem->duration) * 60) . ' minutes', strtotime(date('Y-m-d ' . $firstScheduleItem->time))));
+
+        $i = 0;
+        // fix original loop so it iterates in steps of $problem->duration
+        while (strtotime($str_date) < strtotime($exp_date)) {
+            $i += $problem->duration;
+            $str_date = date("Y-m-d H:i:s", strtotime('+ ' . $i * 60 . ' minutes', strtotime($str_date)));
+            $message  = "Anda Dalam Pengawasan, Buka Untuk Absen Lokasi";
+            MessageLog::create([
+                'staff_id'   => $staffId,
+                'memo'       => $message,
+                'type'       => 'check',
+                'status'     => 'pending',
+                'created_at' => $str_date,
+            ]);
+        }
+    }
+
+    /**
+     * Save shift-type absence logs (keeps same save shape and status logic as original)
+     */
+    private function saveShiftAbsenceLogs($absenceModel, $list_absence, $plannerItem)
+    {
+        // use values from the first element as the base
+        if (count($list_absence) === 0) {
+            return;
+        }
+
+        $baseDuration    = $list_absence[0]->duration;
+        $baseDurationExp = $list_absence[0]->duration_exp;
+        $baseTime        = strtotime(date('Y-m-d ' . $list_absence[0]->time));
+
+        $timein       = date("Y-m-d H:i:s", $baseTime);
+        $timeout      = date("Y-m-d H:i:s", strtotime("+{$baseDuration} minutes", $baseTime));
+        $expired_date = date("Y-m-d H:i:s", strtotime('+ ' . ($baseDuration + $baseDurationExp) . ' minutes', $baseTime));
+
+        foreach ($list_absence as $index => $absenceItem) {
+            $status = 0;
+            if ($index === count($list_absence) - 1) {
+                $status = 1;
+            } elseif ($index === 2 && $absenceItem->type === "break") {
+                $status = 1;
+            }
+
+            // start_date depends on queue (original logic)
+            if ($absenceItem->queue == 1) {
+                $start_date = date("Y-m-d H:i:s", strtotime("-{$baseDurationExp} minutes", $baseTime));
+            } else {
+                $start_date = date("Y-m-d H:i:s", strtotime("+{$baseDuration} minutes", $baseTime));
+            }
+
+            $this->absenceLogRepo->save([
+                'absence_id'               => $absenceModel->id,
+                'shift_planner_id'         => $plannerItem->shift_planner_id,
+                'shift_group_timesheet_id' => $absenceItem->shift_group_timesheet_id,
+                'timein'                   => $timein,
+                'timeout'                  => $timeout,
+                'start_date'               => $start_date,
+                'expired_date'             => $expired_date,
+                'status'                   => $status,
+                'absence_category_id'      => $absenceItem->absence_category_id,
+                'created_at'               => now(),
+                'updated_at'               => now(),
+            ]);
+        }
+    }
+
+    /**
+     * Save regular-type absence logs (work_type_day items)
+     */
+    private function saveRegularAbsenceLogs($absenceModel, $list_absence)
+    {
+        if (count($list_absence) === 0) {
+            return;
+        }
+
+        $baseTime    = strtotime(date('Y-m-d ' . $list_absence[0]->time));
+        $duration    = $list_absence[0]->duration;
+        $durationExp = $list_absence[0]->duration_exp;
+
+        foreach ($list_absence as $item) {
+            $timein       = date("Y-m-d H:i:s", $baseTime);
+            $timeout      = date("Y-m-d H:i:s", strtotime("+{$duration} minutes", $baseTime));
+            $expired_date = date("Y-m-d H:i:s", strtotime("+" . ($duration + $durationExp) . " minutes", $baseTime));
+
+            $start_date = $item->queue == 1
+                ? date("Y-m-d H:i:s", strtotime("-{$durationExp} minutes", $baseTime))
+                : date("Y-m-d H:i:s", strtotime("+{$duration} minutes", $baseTime));
+
+            $this->absenceLogRepo->save([
+                'absence_id'          => $absenceModel->id,
+                'start_date'          => $start_date,
+                'expired_date'        => $expired_date,
+                'work_type_day_id'    => $item->work_type_day_id,
+                'timein'              => $timein,
+                'timeout'             => $timeout,
+                'status'              => 1,
+                'absence_category_id' => $item->absence_category_id,
+                'created_at'          => now(),
+                'updated_at'          => now(),
             ]);
         }
     }

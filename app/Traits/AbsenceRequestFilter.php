@@ -19,6 +19,34 @@ trait AbsenceRequestFilter
     {
         $filters = array_merge(static::$baseFilter, $filters);
 
+        // Define which simple fields you want to support
+        $simpleFilters = ['category', 'status', 'staff_id'];
+
+        foreach ($simpleFilters as $field) {
+            //normal
+            if (array_key_exists($field, $filters)) {
+                $value = $filters[$field];
+                $q->where(function ($query) use ($field, $value) {
+                    if (is_array($value)) {
+                        $query->whereIn($field, $value);
+                    } else {
+                        $query->where($field, $value);
+                    }
+                });
+            }
+            //not
+            if (array_key_exists($field.'_not', $filters)) {
+                $value = $filters[$field.'_not'];
+                $q->where(function ($query) use ($field, $value) {
+                    if (is_array($value)) {
+                        $query->whereNotIn($field, $value);
+                    } else {
+                        $query->where($field, '!=', $value);
+                    }
+                });
+            }
+        }
+
         // select
         if (! empty($filters['select'])) {
             if (is_array($filters['select'])) {
@@ -38,11 +66,6 @@ trait AbsenceRequestFilter
             $q->with($with);
         }
 
-        // staff_id
-        if (! empty($filters['staff_id'])) {
-            $q->where($this->getTable() . '.staff_id', $filters['staff_id']);
-        }
-
         // current (start/end window)
         if (! empty($filters['current'])) {
             $now      = now();
@@ -60,36 +83,6 @@ trait AbsenceRequestFilter
                         ->where($startCol, '<=', $now);
                 });
             });
-        }
-
-        // status
-        if (isset($filters['status'])) {
-            $q->where(function ($query) use ($filters) {
-                if (is_array($filters['status'])) {
-                    $query->whereIn('status', $filters['status']);
-                } else {
-                    $query->where('status', $filters['status']);
-                }
-            });
-        }
-
-        // // category / type / extra columns
-        // foreach (['category', 'type', 'absence_category_id', 'absence_id'] as $col) {
-        //     if (isset($filters[$col])) {
-        //         $value = $filters[$col];
-
-        //         // if array → whereIn
-        //         if (is_array($value)) {
-        //             $q->whereIn($this->getTable() . '.' . $col, $value);
-        //         } else {
-        //             $q->where($this->getTable() . '.' . $col, $value);
-        //         }
-        //     }
-        // }
-
-        // absence_request_id
-        if (! empty($filters['absence_request_id'])) {
-            $q->where($this->getTable() . '.absence_request_id', $filters['absence_request_id']);
         }
 
         // === Ordering ===

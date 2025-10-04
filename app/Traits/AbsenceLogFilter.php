@@ -2,6 +2,7 @@
 namespace App\Traits;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 trait AbsenceLogFilter
 {
@@ -36,6 +37,29 @@ trait AbsenceLogFilter
                 : [$filters['with']];
 
             $q->with($with);
+        }
+
+        // Handle eager loading
+        if (! empty($filters['with'])) {
+            foreach ($filters['with'] as $relation => $constraint) {
+                if (is_numeric($relation)) {
+                    // Normal eager load
+                    $q->with($constraint);
+                } else {
+                    // Eager load with constraint
+                    $q->with([$relation => $constraint]);
+                }
+            }
+        }
+
+        // id
+        if (! empty($filters['id'])) {
+            $q->where($this->getTable() . '.id', $filters['id']);
+        }
+
+        // absence_id
+        if (! empty($filters['absence_id'])) {
+            $q->where($this->getTable() . '.absence_id', $filters['absence_id']);
         }
 
         // staff_id
@@ -82,11 +106,35 @@ trait AbsenceLogFilter
         if (! empty($filters['where_has'])) {
             $q->whereHas('category', function ($cat) use ($filters) {
                 if (! empty($filters['type'])) {
-                    $cat->where($this->getTable() . '.type', $filters['type']);
+                    $cat->where('type', $filters['type']);
                 }
                 if (! empty($filters['queue'])) {
-                    $cat->where($this->getTable() . '.queue', $filters['queue']);
+                    $cat->where('queue', $filters['queue']);
                 }
+            });
+        }
+
+        // 🔥 Auto-constrain category->workTypeDays when work_type_id + day_id are given
+        if (! empty($filters['work_type_id']) && ! empty($filters['day_id'])) {
+            $workTypeIds = (array) $filters['work_type_id'];
+            $dayIds      = (array) $filters['day_id'];
+
+            $q->with([
+                'category' => function ($cat) use ($workTypeIds, $dayIds) {
+                    $cat->with(['workTypeDays' => function ($wtd) use ($workTypeIds, $dayIds) {
+                        $wtd->whereIn('work_type_id', $workTypeIds)
+                            ->whereIn('day_id', $dayIds);
+                    }]);
+                },
+            ]);
+        }
+
+        // 🔥 NEW: filter by shift_group_id on category->shiftGroupTimesheets
+        if (! empty($filters['shift_group_id'])) {
+            $shiftGroupIds = (array) $filters['shift_group_id'];
+
+            $q->whereHas('category.shiftGroupTimesheets', function (Builder $sub) use ($shiftGroupIds) {
+                $sub->whereIn('shift_group_id', $shiftGroupIds);
             });
         }
 

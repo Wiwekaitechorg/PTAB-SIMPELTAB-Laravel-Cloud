@@ -2,23 +2,34 @@
 namespace App\Repositories;
 
 use App\ShiftPlannerStaffs;
-use Illuminate\Support\Collection;
 
-class ShiftPlannerStaffsRepository
+class ShiftPlannerStaffRepository
 {
     public function __construct(?int $staffId = null)
     {
         if ($staffId !== null) {
-            
-        } else {
-            
-        }
-    }    
 
-    public function save(ShiftPlannerStaffs $absenceRequest): ShiftPlannerStaffs
+        } else {
+
+        }
+    }
+
+    public function getLogYet(int $staffId): ShiftPlannerStaffs
     {
-        $absenceRequest->save();
-        return $absenceRequest;
+        $shiftPlannerStaffs = ShiftPlannerStaffs::filter([
+            'staff_id'       => $staffId,
+            'start_date'     => now()->toDateString(),
+            'no_absence'     => true,
+            'order_by_queue' => true, // just a flag to enable the orderBy subselect
+        ])
+            ->get();
+        return $shiftPlannerStaffs;
+    }
+
+    public function save(ShiftPlannerStaffs $shiftPlannerStaffs): ShiftPlannerStaffs
+    {
+        $shiftPlannerStaffs->save();
+        return $shiftPlannerStaffs;
     }
 
     public function findById(int $id): ?ShiftPlannerStaffs
@@ -26,7 +37,7 @@ class ShiftPlannerStaffsRepository
         return ShiftPlannerStaffs::find($id);
     }
 
-    public function findBytype(string $type): ?ShiftPlannerStaffs
+    public function findByType(string $type): ?ShiftPlannerStaffs
     {
         return ShiftPlannerStaffs::where('type', $type)->first();
     }
