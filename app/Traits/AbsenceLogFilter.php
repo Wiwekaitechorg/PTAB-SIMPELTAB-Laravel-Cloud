@@ -74,15 +74,19 @@ trait AbsenceLogFilter
 
         // current (start/end window)
         if (! empty($filters['current'])) {
-            $now      = now();
+            $startDate = $filters['start_date'] ?? now();
+            $endDate   = $filters['end_date'] ?? now();
             $startCol = $filters['start_col'] ?? 'start_date';
             $endCol   = $filters['end_col'] ?? 'expired_date';
 
-            if (empty($filters['current_end'])) {
-                $q->where($startCol, '<=', $now)
-                    ->where($endCol, '>=', $now);
+            if (!empty($filters['current_end'])) {
+                $q->where($endCol, '>=', $endDate);
+            }
+            else if (!empty($filters['expired_end'])) {
+                $q->where($endCol, '<', $endDate);
             } else {
-                $q->where($endCol, '>=', $now);
+                $q->where($startCol, '<=', $startDate)
+                    ->where($endCol, '>=', $endDate);
             }
         }
 

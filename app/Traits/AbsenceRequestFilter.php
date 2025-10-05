@@ -68,19 +68,20 @@ trait AbsenceRequestFilter
 
         // current (start/end window)
         if (! empty($filters['current'])) {
-            $now      = now();
+            $startDate = $filters['start_date'] ?? now();
+            $endDate   = $filters['end_date'] ?? now();
             $startCol = $filters['start_col'] ?? 'start_date';
             $endCol   = $filters['end_col'] ?? 'expired_date';
 
             // If we need the sick/other behaviour:
-            $q->where(function ($query) use ($now, $startCol, $endCol) {
-                $query->where(function ($q1) use ($now, $startCol, $endCol) {
+            $q->where(function ($query) use ($startDate, $endDate, $startCol, $endCol) {
+                $query->where(function ($q1) use ($startDate, $endDate, $startCol, $endCol) {
                     $q1->where('type', '!=', 'sick')
-                        ->where($startCol, '<=', $now)
-                        ->where($endCol, '>=', $now);
-                })->orWhere(function ($q2) use ($now, $startCol) {
+                        ->where($startCol, '<=', $startDate)
+                        ->where($endCol, '>=', $endDate);
+                })->orWhere(function ($q2) use ($startDate, $startCol) {
                     $q2->where('type', 'sick')
-                        ->where($startCol, '<=', $now);
+                        ->where($startCol, '<=', $startDate);
                 });
             });
         }

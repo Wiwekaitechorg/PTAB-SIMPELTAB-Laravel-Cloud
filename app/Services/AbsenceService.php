@@ -2,6 +2,8 @@
 namespace App\Services;
 
 use App\Absence;
+use App\AbsenceRequestLogs;
+use App\Holiday;
 use App\MessageLog;
 use App\Repositories\AbsenceCategoryRepository;
 use App\Repositories\AbsenceLogRepository;
@@ -12,6 +14,7 @@ use App\Repositories\ShiftPlannerStaffRepository;
 use App\Repositories\WorkTypeDayRepository;
 use App\StaffSpecial;
 use App\WorkUnit;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
 class AbsenceService
@@ -24,6 +27,8 @@ class AbsenceService
     protected $staffID;
     protected $absenceRequestRepo;
     protected $absenceLogRepo;
+    protected ?Carbon $startDate;
+    protected ?Carbon $endDate;
 
     // repository dependencies (injected)
     public function __construct(
@@ -33,7 +38,7 @@ class AbsenceService
         private ShiftGroupTimesheetRepository $shiftGroupTimesheet,
         private AbsenceCategoryRepository $absenceCategory,
         private AbsenceRepository $absenceRepo,
-        private WorkTypeDayRepository $workTypeDayRepo
+        private WorkTypeDayRepository $workTypeDayRepo,
     ) {}
 
     /**
@@ -43,12 +48,14 @@ class AbsenceService
      * @param int $shift_group_id
      * @return \Illuminate\Http\JsonResponse
      */
-    public function getSession($staffId)
+    public function getSession($staffId, ?Carbon $startDate = null, ?Carbon $endDate = null)
     {
+        $startDate !== null ? $this->startDate = $startDate : date('Y-m-d H:i:s');
+        $endDate !== null ? $this->endDate     = $endDate : date('Y-m-d H:i:s');
         // local repositories used in original code instantiate AbsenceLogRepository & AbsenceRequestRepository with staff id
         $this->absenceLogRepo     = new AbsenceLogRepository($staffId);
         $this->absenceRequestRepo = new AbsenceRequestRepository($staffId);
-        //Set Staff Attribute (reguler/shift) & Condition (geofenceoff ON/OFF, etc)
+        //Set Staff Attribute (reguler/shift) & Condition (geolocationOff ON/OFF, etc)
         if (! $this->setStaffAttribute()) {
             return response()->json($this->responseGetSession());
         }
@@ -128,9 +135,12 @@ class AbsenceService
 
     private function isNightWindow()
     {
-        $now = date('Y-m-d H:i:s');
-        return (($now > date('Y-m-d 21:00:00') && $now < date('Y-m-d 23:59:59')) ||
-            ($now > date('Y-m-d 01:00:00') && $now < date('Y-m-d 06:00:00')));
+        $now     = strtotime($this->startDate);
+        $baseYmd = date('Y-m-d', $now);
+        return (
+            ($now > strtotime($baseYmd . ' 21:00:00') && $now < strtotime($baseYmd . ' 23:59:59')) ||
+            ($now > strtotime($baseYmd . ' 01:00:00') && $now < strtotime($baseYmd . ' 06:00:00'))
+        );
     }
 
     /**
@@ -147,7 +157,7 @@ class AbsenceService
     }
 
     /**
-     * Set Staff Attribute (reguler/shift) & Condition (geofenceoff ON/OFF, etc)
+     * Set Staff Attribute (reguler/shift) & Condition (geolocationOff ON/OFF, etc)
      */
     private function setStaffAttribute()
     {
@@ -194,11 +204,11 @@ class AbsenceService
     private function isLeave()
     {
         // Check if Request Active (category 'leave' status is 'approve' or 'active', if type 'sick' filter by date start, if 'other' filter by date currently)
-        $leave         = $this->absenceRequestRepo->findByCategory('leave');
+        $leave = $this->absenceRequestRepo->findByCategory('leave');
         // if success => push menu 'leave', data.leave = Request Active, presenceStatus = OFF, return true
         if ($leave) {
-            $this->menu[]        = 'leave';
-            $this->data['leave'] = $leave;
+            $this->menu[]         = 'leave';
+            $this->data['leave']  = $leave;
             $this->presenceStatus = "OFF";
             return true;
         }
@@ -212,8 +222,16 @@ class AbsenceService
     private function isPermission()
     {
         // Check if Request Active (category 'permission' status is 'approve' or 'active', if type 'sick' filter by date start, if 'other' filter by date currently)
+        $permission = $this->absenceRequestRepo->findByCategory('permission');
         // if success => push menu 'permission', data.permission = Request Active, presenceStatus = OFF, return true
+        if ($permission) {
+            $this->menu[]             = 'permission';
+            $this->data['permission'] = $permission;
+            $this->presenceStatus     = "OFF";
+            return true;
+        }
         // else return false
+        return false;
     }
 
     /**
@@ -222,8 +240,19 @@ class AbsenceService
     private function isDuty()
     {
         // Check if Request Active (category 'duty' status is 'approve' or 'active' filter by date currently)
+        $duty = $this->absenceRequestRepo->findByCategory('duty');
         // if success => push menu 'duty', data.duty = Request Active, data.dutyLog = Log Open Related order by id asc, presenceStatus = OFF, return true
+        if ($duty) {
+            $this->menu[]          = 'duty';
+            $this->data['duty']    = $duty;
+            $this->data['dutyLog'] = AbsenceRequestLogs::where('absence_request_id', $duty->id)
+                ->where('type', 'request_log_in')
+                ->first();
+            $this->presenceStatus = "OFF";
+            return true;
+        }
         // else return false
+        return false;
     }
 
     /**
@@ -232,8 +261,17 @@ class AbsenceService
     private function isExtraOld()
     {
         // Check if Log Active Expired
-        // if success => push menu 'extra', data.extra = Request Related, data.extraLog = Log Active Expired, staff.geofenceOff = Request Related type == outside ? ON:OFF, return true
+        $logActiveExpired = $this->absenceLogRepo->findactiveExpired('extra');
+        // if success => push menu 'extra', data.extra = Request Related, data.extraLog = Log Active Expired, staff.geolocationOff = Request Related type == outside ? ON:OFF, return true
+        if ($logActiveExpired) {
+            $this->menu[]                = 'extra';
+            $this->data['extra']         = $this->absenceRequestRepo->find($logActiveExpired->absence_request_id);
+            $this->data['extraLog']      = $logActiveExpired;
+            $this->staff->geolocationOff = $this->data['extra']->type == 'outside' ? 'ON' : 'OFF';
+            return true;
+        }
         // else return false
+        return false;
     }
 
     /**
@@ -242,8 +280,14 @@ class AbsenceService
     private function isHoliday()
     {
         // Check if Holiday Active (by staff work type)
+        $holiday = Holiday::whereDate('start', '<=', date('Y-m-d'))->whereDate('end', '>=', date('Y-m-d'))->first();
         // if success => presenceStatus = OFF, return true
+        if ($holiday) {
+            $this->presenceStatus = "OFF";
+            return true;
+        }
         // else return false
+        return false;
     }
 
     /**
@@ -252,7 +296,15 @@ class AbsenceService
     private function isExtraHoliday()
     {
         // Check if Request Active & Check if Holiday Active
-        // if success => push menu 'extra', data.extra = Request Active, data.extraLog = Log Open Related  order by id asc, staff.geofenceOff = Request Active type == outside ? ON:OFF, return true
+        $holidayExtra = $this->absenceRequestRepo->findByCategory('extra');
+        // if success => push menu 'extra', data.extra = Request Active, data.extraLog = Log Open Related  order by id asc, staff.geolocationOff = Request Active type == outside ? ON:OFF, return true
+        if ($holidayExtra && $this->isHoliday()) {
+            $this->menu[]                = 'extra';
+            $this->data['extra']         = $holidayExtra;
+            $this->data['extraLog']      = $this->absenceLogRepo->findOpen('extra', $holidayExtra->id);
+            $this->staff->geolocationOff = $holidayExtra->type == 'outside' ? 'ON' : 'OFF';
+            return true;
+        }
         // else return false
     }
 
@@ -332,7 +384,7 @@ class AbsenceService
     private function isExtraPresenceClosed()
     {
         // Check if Request Active & Check if Presence Closed
-        // if success => push menu 'extra', data.extra = Request Active, data.extraLog = Log Open Related order by id asc, staff.geofenceOff = Request Active type == outside ? ON:OFF, return true
+        // if success => push menu 'extra', data.extra = Request Active, data.extraLog = Log Open Related order by id asc, staff.geolocationOff = Request Active type == outside ? ON:OFF, return true
         // else return false
     }
 
@@ -345,8 +397,12 @@ class AbsenceService
             return;
         }
 
-        $str_date = date("Y-m-d H:i:s", strtotime(date('Y-m-d ' . $firstScheduleItem->time)));
-        $exp_date = date("Y-m-d H:i:s", strtotime('+ ' . (($firstScheduleItem->duration - $problem->duration) * 60) . ' minutes', strtotime(date('Y-m-d ' . $firstScheduleItem->time))));
+        $baseDate = date('Y-m-d', strtotime($this->startDate));
+        $str_date = date('Y-m-d H:i:s', strtotime($baseDate . ' ' . $firstScheduleItem->time));
+        $exp_date = date('Y-m-d H:i:s', strtotime(
+            '+ ' . (($firstScheduleItem->duration - $problem->duration) * 60) . ' minutes',
+            strtotime($str_date)
+        ));
 
         $i = 0;
         // fix original loop so it iterates in steps of $problem->duration

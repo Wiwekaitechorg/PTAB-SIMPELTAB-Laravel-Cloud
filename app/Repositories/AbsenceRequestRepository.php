@@ -2,14 +2,23 @@
 namespace App\Repositories;
 
 use App\AbsenceRequest;
+use Carbon\Carbon;
 
 class AbsenceRequestRepository
 {
     protected ?int $staffId;
-    public function __construct(?int $staffId = null)
+    protected ?Carbon $startDate;
+    protected ?Carbon $endDate;
+    public function __construct(?int $staffId = null, ?Carbon $startDate = null, ?Carbon $endDate = null)
     {
         if ($staffId !== null) {
             $this->staffId = $staffId;
+        }
+        if ($startDate !== null) {
+            $this->startDate = $startDate;
+        }
+        if ($endDate !== null) {
+            $this->endDate = $endDate;
         }
     }
 
@@ -19,6 +28,8 @@ class AbsenceRequestRepository
             'staff_id' => $this->staffId,
             'category' => $category,
             'status'   => ['approve', 'active', 'pending'],
+            'start_date' => $this->startDate,
+            'end_date'   => $this->endDate,
         ])->first();
     }
 
@@ -27,6 +38,8 @@ class AbsenceRequestRepository
         return AbsenceRequest::filter([
             'staff_id' => $this->staffId,
             'category' => $category,
+            'start_date' => $this->startDate,   
+            'end_date'   => $this->endDate,
         ])->first();
     }
 
@@ -35,6 +48,8 @@ class AbsenceRequestRepository
         $filters             = [];
         $filters['staff_id'] = $this->staffId;
         $filters['category'] = $category;
+        $filters['start_date'] = $this->startDate;
+        $filters['end_date']   = $this->endDate;
         // Not filters
         foreach ($notIn as $n) {
             foreach ($n as $col => $val) {
